@@ -1,0 +1,67 @@
+# =========================
+# Secrets & Environments
+# =========================
+# NEVER commit your actual .env file!
+.env
+.env.*
+!.env.example
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# =========================
+# Python / Compiled bytes
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+wheels/
+
+# =========================
+# Pytest & Coverage
+# =========================
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.log
+
+# =========================
+# IDEs & Editors
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =========================
+# OS Generated Files
+# =========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# =========================
+# Local Databases
+# =========================
+# Just in case you test with SQLite locally
+*.sqlite
+*.sqlite3
+*.db
+
+# =========================
+# PlainText Information
+# =========================
+.txt
