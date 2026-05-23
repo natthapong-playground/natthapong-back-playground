@@ -7,6 +7,7 @@
 !.env.example
 
 # Virtual Environments
+venv
 venv/
 .venv/
 env/
@@ -64,4 +65,4 @@ Thumbs.db
 # =========================
 # PlainText Information
 # =========================
-.txt
+*.txt
