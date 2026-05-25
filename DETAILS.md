@@ -2,15 +2,20 @@
 
 <!-- venv - bash terminal -->
 python -m venv venv
+
+# step 1
 source venv/Scripts/activate
 
 <!-- Keep -->
+# step 3
 uvicorn app.main:app --reload
 
 <!-- docker -->
 touch docker-compose.yml  <!-- create docker-compose -->
 
 docker compose down
+
+# step 2
 docker compose up -d
 
 <!-- Packages -->
