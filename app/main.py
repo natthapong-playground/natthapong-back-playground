@@ -3,7 +3,9 @@ from fastapi import FastAPI
 from app.core.config import settings
 from app.models.base import engine, Base
 
-import app.models.user_model 
+import app.models.user_model
+
+from app.api.controllers import auth_routes
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -22,6 +24,12 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan
 )
+
+
+
+app.include_router(auth_routes.router, prefix=settings.API_V1_STR, tags=["Authentication"])
+
+
 
 @app.get("/")
 async def root():
