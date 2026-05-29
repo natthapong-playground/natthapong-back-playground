@@ -50,7 +50,7 @@ app.add_middleware(
 
 
 app.include_router(auth_routes.router, prefix=settings.API_V1_STR, tags=["Authentication"])
-app.include_router(user_routes.router, prefix=settings.API_V1_STR, tags=["UsersRoutes"])
+app.include_router(user_routes.router, prefix=f"{settings.API_V1_STR}/users", tags=["UsersRoutes"])
 
 
 
