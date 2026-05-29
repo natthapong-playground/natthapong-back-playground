@@ -7,7 +7,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 import app.models.user_model
 
-from app.api.controllers import auth_routes
+from app.api.controllers import auth_routes, user_routes
+
+
 
 # class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 #     async def dispatch(self, request, call_next):
@@ -48,6 +50,7 @@ app.add_middleware(
 
 
 app.include_router(auth_routes.router, prefix=settings.API_V1_STR, tags=["Authentication"])
+app.include_router(user_routes.router, prefix=settings.API_V1_STR, tags=["UsersRoutes"])
 
 
 
