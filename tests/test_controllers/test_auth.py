@@ -12,7 +12,7 @@ async def test_register_new_user(async_client):
         "password": "ThisIsRegisterNewUserTesting123"
     }
     
-    response = await async_client.post(f"{settings.API_V1_STR}/users/", json=payload)
+    response = await async_client.post(f"{settings.API_V1_STR}/users/register", json=payload)
     
     assert response.status_code == 201
     

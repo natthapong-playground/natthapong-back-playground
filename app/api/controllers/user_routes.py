@@ -9,7 +9,7 @@ from app.api.dependencies import get_current_user, get_db
 router = APIRouter()
 
 # CREATE
-@router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register_user(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
     existing_user = await user_service.get_user_by_email(db, email=user_in.email)
     if existing_user:
