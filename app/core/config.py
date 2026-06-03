@@ -5,6 +5,7 @@ class Settings(BaseSettings):
     API_V1_STR: str
     SECRET_KEY: str
     DATABASE_URL: str
+    REDIS_URL: str
 
     ALGORITHM: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int

@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Response
 from app.core.config import settings
+from app.core.redis_client import get_redis_client, close_redis_client
 from app.models.base import engine, Base
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -27,8 +28,10 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
     print("Tables created successfully!")
     
+    await get_redis_client().ping()
     yield # runs application
     
+    await close_redis_client()
     await engine.dispose()
 
 # init the app with the lifespan event
