@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jose import jwt, JWTError
 
 from app.models.base import AsyncSessionLocal
+from app.models.user_model import User
 from app.core.config import settings
 from app.core.redis_client import get_redis_client
 from app.services import user_service
@@ -47,5 +48,15 @@ async def get_current_user(
         raise credentials_exception
     if not user.is_active:
         raise credentials_exception
-    
+
     return user
+
+def require_roles(*allowed_roles: str):
+    async def _require_roles(current_user: User = Depends(get_current_user)) -> User:
+        if current_user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to perform this action.",
+            )
+        return current_user
+    return _require_roles
