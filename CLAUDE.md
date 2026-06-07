@@ -26,3 +26,16 @@ it stays the source of truth.
 - **models** = database entities (SQLAlchemy).
 - **schemas** = Pydantic validation / serialization (request vs response).
 - **core** = config + security (env parsing, hashing, JWT).
+
+## Living documentation — `codebase-docs/`
+`codebase-docs/` holds one plain-text `.txt` doc per source file, written for
+both engineers and non-engineers. **ALWAYS read `codebase-docs/_INDEX.txt`
+first** — it is the head of that folder and defines the maintenance protocol,
+the doc template, and the file map.
+
+This is a hard rule: whenever you create, modify, move, rename, or delete a file
+under `app/` or `tests/`, **update its matching `codebase-docs/*.txt` doc in the
+same change** (create/edit/delete to mirror the source, and refresh the
+doc's `LAST-SYNCED` date). Keep the `[ PLAIN ENGLISH ]` and `[ TECHNICAL ]`
+sections consistent with each other and with the code. A doc that describes
+behavior the code no longer has is a defect — fix it as part of the work.
