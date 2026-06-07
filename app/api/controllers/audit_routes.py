@@ -15,7 +15,7 @@ async def list_audit_logs(
     method: str | None = Query(None),
     status_code: int | None = Query(None),
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(150, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles("SuperAdmin")),
 ):
