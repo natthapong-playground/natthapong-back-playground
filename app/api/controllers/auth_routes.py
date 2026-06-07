@@ -1,27 +1,17 @@
+import redis.asyncio as redis
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from jose import jwt, JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.schemas.user_schema import UserCreate
-from app.core.security import get_password_hash, create_access_token
-
-from app.api.dependencies import get_db
-from app.services.user_service import authenticate_user, InactiveUserError
+from app.core.config import settings
 from app.core.security import create_access_token
+
+from app.api.dependencies import get_db, get_redis, oauth2_scheme
+from app.services.user_service import authenticate_user, InactiveUserError
+from app.services.auth_service import revoke_token
 from app.schemas.token_schema import Token
 
 router = APIRouter()
-
-@router.post("/test-security")
-async def test_security_funcstion(user_in: UserCreate):
-    hashed_pw = get_password_hash(user_in.password)
-    token = create_access_token(data={"sub": user_in.email})
-    
-    return {
-            "message": "Pass!",
-            "email": user_in.email,
-            "hashed_password": hashed_pw,
-            "token": token
-        }
 
 @router.post("/login", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
@@ -42,3 +32,22 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     
     access_token = create_access_token(data={"sub": user.email, "role": user.role})
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/logout")
+async def logout(token: str = Depends(oauth2_scheme), r: redis.Redis = Depends(get_redis)):
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    jti = payload.get("jti")
+    exp = payload.get("exp")
+    if jti and exp:
+        await revoke_token(r, jti, exp)
+
+    return {"message": "Successfully logged out."}
