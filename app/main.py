@@ -10,7 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 import app.models.user_model
 import app.models.audit_log_model
 
-from app.api.controllers import auth_routes, user_routes, audit_routes
+from app.api.controllers import auth_routes, user_routes, audit_routes, countries_routes, clock_routes
 
 
 
@@ -59,6 +59,8 @@ app.add_middleware(
 app.include_router(auth_routes.router, prefix=settings.API_V1_STR, tags=["Authentication"])
 app.include_router(user_routes.router, prefix=f"{settings.API_V1_STR}/users", tags=["UsersRoutes"])
 app.include_router(audit_routes.router, prefix=settings.API_V1_STR, tags=["AuditLogs"])
+app.include_router(countries_routes.router, prefix=settings.API_V1_STR, tags=["Countries"])
+app.include_router(clock_routes.router, prefix=settings.API_V1_STR, tags=["Clock"])
 
 
 
