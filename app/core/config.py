@@ -9,7 +9,14 @@ class Settings(BaseSettings):
 
     ALGORITHM: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int
-    
+    REFRESH_TOKEN_EXPIRE_MINUTES: int
+
+    LOGIN_RATE_LIMIT_MAX_ATTEMPTS: int
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS: int
+
+    REGISTER_RATE_LIMIT_MAX_ATTEMPTS: int
+    REGISTER_RATE_LIMIT_WINDOW_SECONDS: int
+
     ORIGINS_API: list[str]
     
     model_config = SettingsConfigDict(
