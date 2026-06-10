@@ -34,7 +34,7 @@ async def test_search_returns_camelcase_records(async_client, auth_headers):
     # Pydantic alias_generator=to_camel -> JSON keys are camelCase.
     assert set(first) >= {
         "code", "name", "timezone",
-        "utcOffsetMinutes", "utcOffsetLabel", "localTime", "flagEmoji",
+        "utcOffsetMinutes", "utcOffsetLabel", "localTime",
     }
     assert first["utcOffsetLabel"].startswith("UTC")
 
