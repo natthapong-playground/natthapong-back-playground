@@ -245,6 +245,7 @@
   { "code": "VU", "name": "Vanuatu", "timezone": "Pacific/Efate" },
   { "code": "WF", "name": "Wallis & Futuna", "timezone": "Pacific/Wallis" },
   { "code": "WS", "name": "Samoa", "timezone": "Pacific/Apia" },
+  { "code": "XK", "name": "Kosovo", "timezone": "Europe/Belgrade" },
   { "code": "YE", "name": "Yemen", "timezone": "Asia/Aden" },
   { "code": "YT", "name": "Mayotte", "timezone": "Indian/Mayotte" },
   { "code": "ZA", "name": "South Africa", "timezone": "Africa/Johannesburg" },
