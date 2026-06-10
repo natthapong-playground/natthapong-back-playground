@@ -59,3 +59,29 @@ app.include_router(clock_routes.router, prefix=settings.API_V1_STR, tags=["Clock
 @app.get("/")
 async def root():
     return {"message": "Welcome to the API", "project": settings.PROJECT_NAME}
+
+
+@app.get("/health")
+async def health():
+    # Readiness probe for Docker/monitoring: verifies DB + Redis are reachable.
+    db_ok = True
+    redis_ok = True
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+    except Exception:
+        db_ok = False
+    try:
+        await get_redis_client().ping()
+    except Exception:
+        redis_ok = False
+
+    healthy = db_ok and redis_ok
+    return JSONResponse(
+        status_code=200 if healthy else 503,
+        content={
+            "status": "ok" if healthy else "degraded",
+            "database": db_ok,
+            "redis": redis_ok,
+        },
+    )
