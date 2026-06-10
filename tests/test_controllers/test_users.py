@@ -85,6 +85,26 @@ async def test_register_defaults_role_to_regular(async_client):
     assert response.json()["role"] == "Regular"
 
 
+async def test_register_is_rate_limited_per_ip(async_client):
+    # The async_client fixture pins a unique source IP, so this test's signups
+    # share one counter, isolated from the rest of the suite.
+    max_attempts = settings.REGISTER_RATE_LIMIT_MAX_ATTEMPTS
+
+    for _ in range(max_attempts):
+        resp = await _register(
+            async_client,
+            {"email": _unique_email(), "password": "ValidPassword123", "role": "Regular"},
+        )
+        assert resp.status_code == 201
+
+    blocked = await _register(
+        async_client,
+        {"email": _unique_email(), "password": "ValidPassword123", "role": "Regular"},
+    )
+    assert blocked.status_code == 429
+    assert "Retry-After" in blocked.headers
+
+
 # --------------------------------------------------------------------------- #
 # GET /users/myprofile  (token edge cases not covered by test_auth.py)         #
 # --------------------------------------------------------------------------- #

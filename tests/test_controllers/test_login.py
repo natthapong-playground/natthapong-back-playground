@@ -63,6 +63,13 @@ async def test_login_nonexistent_email(async_client):
     assert response.json()["detail"] == "Incorrect email or password."
 
 
+async def test_login_missing_fields_is_422(async_client):
+    # OAuth2PasswordRequestForm requires username + password form fields.
+    response = await async_client.post(LOGIN_URL, data={})
+
+    assert response.status_code == 422
+
+
 async def test_login_inactive_user(async_client):
     email = _unique_email()
     password = "ValidPassword123"

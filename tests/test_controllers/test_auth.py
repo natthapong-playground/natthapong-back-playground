@@ -1,7 +1,11 @@
 import pytest
 import time
 from uuid import uuid4
+from sqlalchemy import delete
 from app.core.config import settings
+from app.core.security import create_access_token
+from app.models.base import AsyncSessionLocal
+from app.models.user_model import User
 pytestmark = pytest.mark.asyncio
 
 
@@ -103,3 +107,41 @@ async def test_logout_missing_token(async_client):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Not authenticated"
+
+
+async def test_profile_rejects_token_without_sub(async_client):
+    # A validly-signed access token that carries no 'sub' must be rejected.
+    token = create_access_token({"role": "Regular"})
+    response = await async_client.get(
+        f"{settings.API_V1_STR}/users/myprofile",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 401
+
+
+async def test_profile_rejects_deleted_user(async_client):
+    email = f"pytest_{uuid4().hex}@mail.com"
+    password = "ThisUserWillBeDeleted123"
+
+    await async_client.post(
+        f"{settings.API_V1_STR}/users/register",
+        json={"email": email, "role": "Regular", "password": password},
+    )
+    login = await async_client.post(
+        f"{settings.API_V1_STR}/login",
+        data={"username": email, "password": password},
+    )
+    token = login.json()["access_token"]
+
+    # Remove the user while their token is still otherwise valid.
+    async with AsyncSessionLocal() as session:
+        await session.execute(delete(User).where(User.email == email))
+        await session.commit()
+
+    response = await async_client.get(
+        f"{settings.API_V1_STR}/users/myprofile",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 401

@@ -36,7 +36,8 @@ async def get_current_user(
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         email: str = payload.get("sub")
         jti: str = payload.get("jti")
-        if email is None:
+        # Refresh tokens must not be usable as access tokens on protected routes.
+        if email is None or payload.get("type") != "access":
             raise credentials_exception
     except JWTError:
         raise credentials_exception

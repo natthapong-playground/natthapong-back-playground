@@ -60,7 +60,7 @@ async def query_logs(
     method: str | None = None,
     status_code: int | None = None,
     skip: int = 0,
-    limit: int = 50,
+    limit: int = 150,
 ) -> list[AuditLog]:
     stmt = select(AuditLog)
     if actor_user_id is not None:
