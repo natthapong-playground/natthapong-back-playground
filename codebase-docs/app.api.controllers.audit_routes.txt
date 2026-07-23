@@ -1,0 +1,35 @@
+================================================================================
+FILE:        app/api/controllers/audit_routes.py
+LAYER:       controller
+LAST-SYNCED: 2026-06-08
+================================================================================
+
+[ PLAIN ENGLISH ]
+This is the window into the audit log. Only a SuperAdmin can open it. It lists
+the recorded API activity, newest first, and can be filtered (by who, by method,
+by result) and paged through.
+
+[ TECHNICAL ]
+Thin controller mounted at API_V1_STR (so /api/v1/audit-logs). Access gated by
+require_roles("SuperAdmin"); querying delegated to audit_service.query_logs.
+
+[ METHODS / SYMBOLS ]
+- list_audit_logs(actor_user_id, method, status_code, skip, limit, db, _)
+    ->  GET /audit-logs
+    Plain: Show audit entries, filtered and paged, for a SuperAdmin only.
+    Tech:  Query params: actor_user_id, method, status_code, skip(>=0),
+           limit(1..200, default 150). `_` = Depends(require_roles("SuperAdmin"))
+           enforces 401 (no/invalid token) then 403 (wrong role). Returns
+           list[AuditLogResponse].
+
+[ READS / WRITES / LOGS ]
+Reads: audit_logs table. Writes: none. Note: reading this endpoint is itself a
+SENSITIVE_GET, so the middleware logs each successful read.
+
+[ RELATIONS ]
+Called by: SuperAdmin HTTP clients; router included in main.
+Calls:     services.audit_service.query_logs, api.dependencies
+           (get_db, require_roles), schemas.audit_log_schema.
+
+[ NOTES / GOTCHAS ]
+limit is capped at 200 to avoid unbounded reads. Ordering is newest-first by id.

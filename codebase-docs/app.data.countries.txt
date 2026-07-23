@@ -1,0 +1,47 @@
+================================================================================
+FILE:        app/data/countries.json
+LAYER:       data (static dataset)
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+The master list of countries for the World Timezone feature. Each entry has the
+country or region code, its display name, and one representative timezone.
+That's all that's stored; current offsets and local times are computed on demand.
+
+[ TECHNICAL ]
+A JSON array of records with exactly `code`, `name`, and `timezone` keys. It has
+252 entries — every ISO 3166-1
+country/territory that has an IANA timezone (247), plus the 4 UK home nations,
+plus Kosovo (XK). One representative zone each.
+(The only two ISO codes excluded are BV and HM, uninhabited islands with no
+IANA zone.) Flags and offsets are not stored; offsets are computed live in
+timezone_service. All timezone strings are valid IANA keys (validated against
+zoneinfo with the tzdata package).
+
+[ METHODS / SYMBOLS ]
+N/A (data file).
+
+[ READS / WRITES / LOGS ]
+Read by services.country_service._records() (cached). Never written at runtime.
+
+[ RELATIONS ]
+Used by:   services.country_service.
+Source:    Generated from the IANA tz database shipped with the `tzdata`
+           package: iso3166.tab (all country codes + names) joined with
+           zone.tab/zone1970.tab (country -> representative IANA zone).
+           Regenerate by re-running that join when tzdata updates.
+
+[ NOTES / GOTCHAS ]
+Coverage is full ISO 3166-1 (sovereign states AND dependent territories: e.g.
+HK, GL, PR, GU, FO), PLUS the four UK home nations as custom rows
+(GB-ENG/GB-NIR/GB-SCT/GB-WLS, all Europe/London) using ISO 3166-2 subdivision
+codes. Those four are NOT real ISO alpha-2 countries — they work only because
+the service treats `code` as a plain lookup key, not a validated ISO code.
+Kosovo (XK, Europe/Belgrade) is likewise a user-assigned code, not an official
+ISO 3166-1 entry, included on the same plain-lookup basis. That brings the
+total to 252.
+Still ONE representative zone per country; multi-zone countries (US, RU, AU)
+show their representative zone only. To support per-region times later, extend the
+record shape and the schema. Editing this file requires a process restart (the
+service caches it via lru_cache).

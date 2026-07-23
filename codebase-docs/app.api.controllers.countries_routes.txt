@@ -1,0 +1,41 @@
+================================================================================
+FILE:        app/api/controllers/countries_routes.py
+LAYER:       controller
+LAST-SYNCED: 2026-06-09
+================================================================================
+
+[ PLAIN ENGLISH ]
+These are the two endpoints the search box and the map hover use: one to search
+for countries by name, and one to fetch a single country by its code. Both
+require the caller to be logged in (a valid access token).
+
+[ TECHNICAL ]
+Thin controller mounted at API_V1_STR (so /<API_V1_STR>/countries...). Routing
+and validation only; all logic delegated to country_service. Auth is enforced
+at ROUTER level: APIRouter(dependencies=[Depends(get_current_user)]) so every
+endpoint here needs a valid, non-revoked token for an active user (401 if not).
+
+[ METHODS / SYMBOLS ]
+- search_countries(search, limit) -> GET /countries
+    Plain: Return countries matching a name query (or all of them).
+    Tech:  Query params search(str|None), limit(int, default 10, ge=1, le=200).
+           Returns list[CountrySchema] (camelCase JSON).
+- get_country(code) -> GET /countries/{code}
+    Plain: Return one country by code; 404 if unknown.
+    Tech:  Path param code (ISO alpha-2, case-insensitive). 404 with
+           {"detail": "Unknown country code"} when not found. Returns
+           CountrySchema.
+
+[ READS / WRITES / LOGS ]
+Reads: country dataset (via service). Writes: none. Note: these are plain GETs,
+not in SENSITIVE_GET_PREFIXES, so successful reads are NOT audited; failures
+(404/422) are audited like any error by the audit middleware.
+
+[ RELATIONS ]
+Called by: Angular SearchBar/DetailPanel; router included in main.
+Calls:     services.country_service (search_countries, get_country),
+           schemas.country_schema.CountrySchema.
+
+[ NOTES / GOTCHAS ]
+limit is capped at 200 to avoid unbounded reads. Codes are normalised to
+upper-case in the service. v1 assumes one representative IANA zone per country.

@@ -1,0 +1,36 @@
+================================================================================
+FILE:        app/services/timezone_service.py
+LAYER:       service
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+This is the heart of the World Timezone feature. Given a country and one shared
+"now" (in UTC), it works out that country's current clock time and how far it is
+from UTC at that instant, automatically accounting for daylight saving rules.
+
+[ TECHNICAL ]
+Pure, stateless timezone math built on the standard library `zoneinfo` (IANA
+database; needs the `tzdata` package on Windows). No DB, no I/O. This is the
+single place country offsets and local times are computed. The module contains
+only `build_country`.
+
+[ METHODS / SYMBOLS ]
+- build_country(record, reference_utc) -> CountrySchema
+    Plain: Build one country row (offset + local time) for the given moment.
+    Tech:  record = {code, name, timezone}. Computes
+           local = reference_utc.astimezone(ZoneInfo(timezone)); derives
+           offset minutes from local.utcoffset() (DST-correct); formats
+           utcOffsetLabel as UTC+/-HH:MM; localTime = local.isoformat().
+
+[ READS / WRITES / LOGS ]
+None — pure computation.
+
+[ RELATIONS ]
+Called by: services.country_service (search/get/snapshot).
+Calls:     zoneinfo.ZoneInfo, schemas.country_schema.CountrySchema.
+
+[ NOTES / GOTCHAS ]
+reference_utc must be timezone-aware UTC. Offsets are never stored — always
+recomputed from the IANA zone + the instant, so a country in DST shows the right
+offset for the season (e.g. UK = UTC+01:00 in June, UTC+00:00 in January).

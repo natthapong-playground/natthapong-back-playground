@@ -1,0 +1,37 @@
+================================================================================
+FILE:        tests/test_controllers/test_login.py
+LAYER:       test
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+These tests cover logging in: the happy path plus the ways it can fail (wrong
+password, unknown email, deactivated account).
+
+[ TECHNICAL ]
+Async controller tests via async_client. Unique UUID emails keep each test
+independent.
+
+[ METHODS / SYMBOLS ]
+- test_login_success .......... register+login -> 200; token_type "bearer";
+                                non-empty access_token.
+- test_login_wrong_password ... -> 401 "Incorrect email or password."
+- test_login_nonexistent_email  -> 401 "Incorrect email or password."
+- test_login_missing_fields_is_422 POST /login with empty form -> 422
+                                (OAuth2PasswordRequestForm validation).
+- test_login_inactive_user .... deactivate the user in-DB, then login -> 403
+                                "Your account has been deactivated...".
+
+[ READS / WRITES / LOGS ]
+Writes users; directly updates is_active via AsyncSessionLocal for the inactive
+case; produces audit_logs rows as a side effect. Registration increments Redis
+register counters; failed logins increment login-failure counters and successful
+logins clear them. Created users remain in the shared DB.
+
+[ RELATIONS ]
+Calls (via HTTP): auth_routes (login), user_routes (register). Uses
+conftest.async_client and models.base/user_model for the direct DB update.
+
+[ NOTES / GOTCHAS ]
+Wrong-password and unknown-email return the SAME message on purpose (no user
+enumeration). Missing-form-field 422 is now covered (test_login_missing_fields_is_422).

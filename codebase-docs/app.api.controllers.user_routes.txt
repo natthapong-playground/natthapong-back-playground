@@ -1,0 +1,49 @@
+================================================================================
+FILE:        app/api/controllers/user_routes.py
+LAYER:       controller
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+This handles creating a new user account and letting a logged-in user view their
+own profile.
+
+[ TECHNICAL ]
+Thin controller mounted at API_V1_STR + "/users". Validation via UserCreate;
+output shaped by UserResponse (never exposes the password hash).
+
+[ METHODS / SYMBOLS ]
+- _client_ip(request) -> str
+    Plain: The caller's IP (proxy-aware) for the signup throttle.
+    Tech:  first X-Forwarded-For entry, else request.client.host, else "unknown".
+- register_user(user_in, request, db, r)  ->  POST /users/register  (201)
+    Plain: Make a new account, unless the IP is over the signup limit or the
+           email is already taken.
+    Tech:  429 (+Retry-After) if rate_limit_service.is_register_blocked for the IP;
+           else record_register_attempt before duplicate lookup; 400 if
+           get_user_by_email finds an existing user; else create_user(); returns
+           UserResponse. Only schema-validated requests enter this handler.
+- read_users_own_profile(current_user)  ->  GET /users/myprofile
+    Plain: Show the signed-in user their own details.
+    Tech:  current_user injected via Depends(get_current_user); returns
+           UserResponse.
+
+[ READS / WRITES / LOGS ]
+Reads: request body, X-Forwarded-For, users table, Redis (register counter).
+Writes: Redis register counter; inserts a users row on register. Audited by
+middleware: POST /register (mutation) and any failed GET /myprofile (401).
+Successful GET /myprofile is NOT logged (non-sensitive read).
+
+[ RELATIONS ]
+Called by: HTTP clients; router included in main.
+Calls:     services.user_service (get_user_by_email, create_user),
+           services.rate_limit_service (register throttle),
+           api.dependencies (get_db, get_redis, get_current_user),
+           schemas.user_schema.
+
+[ NOTES / GOTCHAS ]
+register currently accepts any role in the payload (including SuperAdmin) — there
+is no admin-only guard on account creation yet. The rate-limit counter includes
+duplicate-email requests because it increments before that check, but excludes
+schema-invalid 422 bodies because those never enter the handler. Requests already
+blocked at the threshold are checked but not incremented again.

@@ -1,0 +1,38 @@
+================================================================================
+FILE:        app/api/controllers/clock_routes.py
+LAYER:       controller
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+This is the main "what time is it everywhere" endpoint. You give it a list of
+country codes and it returns each one's current local time plus a single
+timestamp for "now" shared by the batch. This repository does not contain a
+frontend or prescribe a polling interval.
+
+[ TECHNICAL ]
+Thin controller mounted at API_V1_STR (so /<API_V1_STR>/clock). Parses the comma
+codes and delegates to country_service.build_snapshot. Auth is enforced at
+ROUTER level: APIRouter(dependencies=[Depends(get_current_user)]) — a valid,
+non-revoked token for an active user is required (401 otherwise).
+
+[ METHODS / SYMBOLS ]
+- clock_snapshot(code) -> GET /clock
+    Plain: Return current local times for several countries from one shared "now".
+    Tech:  Required query param `code` — a comma-separated list (e.g.
+           "TH,GB,DE"). Splits on comma, strips blanks, upper-cases. Returns
+           ClockSnapshotSchema {referenceUtc, countries[]}; order preserved;
+           unknown codes skipped; empty/blank -> empty list. Missing `code` -> 422.
+
+[ READS / WRITES / LOGS ]
+Reads: country dataset (via service). Writes: none. Plain GET (non-sensitive):
+successful reads are not audited; a 422 (missing codes) is audited as an error.
+
+[ RELATIONS ]
+Called by: HTTP API clients; router included in main.
+Calls:     services.country_service.build_snapshot,
+           schemas.country_schema.ClockSnapshotSchema.
+
+[ NOTES / GOTCHAS ]
+One reference instant per request keeps the batch internally consistent. Unknown
+codes are skipped silently by design rather than returning 400.

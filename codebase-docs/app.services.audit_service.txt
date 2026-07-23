@@ -1,0 +1,45 @@
+================================================================================
+FILE:        app/services/audit_service.py
+LAYER:       service
+LAST-SYNCED: 2026-06-07
+================================================================================
+
+[ PLAIN ENGLISH ]
+This is the brains of the audit log. It decides WHICH requests are worth
+recording, writes a new entry, and answers queries when a SuperAdmin reads the
+log back.
+
+[ TECHNICAL ]
+Owns the logging POLICY (so the middleware stays dumb) plus create/query over
+the AuditLog model.
+
+[ METHODS / SYMBOLS ]
+- MUTATING_METHODS / SENSITIVE_GET_PREFIXES
+    Plain: The rules' raw material: which verbs and which sensitive GET paths.
+    Tech:  {"POST","PUT","PATCH","DELETE"}; ("<API_V1_STR>/audit-logs",).
+- should_log(method, path, status_code) -> bool
+    Plain: Is this request worth recording?
+    Tech:  True if mutating method, OR status >= 400 (any failure), OR a GET on a
+           sensitive prefix. Else False.
+- create_log(db, *, method, path, status_code, actor_*, client_ip, user_agent,
+             duration_ms, request_id) -> AuditLog  (async)
+    Plain: Save one audit entry.
+    Tech:  builds AuditLog, add/commit/refresh, returns it. Keyword-only fields.
+- query_logs(db, *, actor_user_id, method, status_code, skip, limit)
+    -> list[AuditLog]  (async)
+    Plain: Fetch entries, optionally filtered, newest first, paged.
+    Tech:  optional WHEREs (method upper-cased); ORDER BY id DESC; offset/limit.
+
+[ READS / WRITES / LOGS ]
+Reads/Writes: audit_logs table. (should_log is pure logic.)
+
+[ RELATIONS ]
+Called by: core.middleware (should_log, create_log), controllers.audit_routes
+           (query_logs).
+Calls:     models.audit_log_model, core.config.
+
+[ NOTES / GOTCHAS ]
+This is the SINGLE place to change logging behavior. To start logging a new
+sensitive GET, add its prefix to SENSITIVE_GET_PREFIXES — nothing else changes.
+PATCH/PUT are already covered for future update endpoints even though none exist
+yet.

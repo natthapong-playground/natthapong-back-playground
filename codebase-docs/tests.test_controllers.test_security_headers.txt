@@ -1,0 +1,37 @@
+================================================================================
+FILE:        tests/test_controllers/test_security_headers.py
+LAYER:       test
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+Checks that returned handled responses carry the browser-hardening headers
+(anti-sniffing, anti-clickjacking, content policy, HTTPS pinning) on one success
+and one handled authentication error.
+
+[ TECHNICAL ]
+Async httpx tests against the real ASGI app, asserting SecurityHeadersMiddleware
+output. It does not exercise an exception propagated through `call_next`.
+
+[ METHODS / SYMBOLS ]
+- test_security_headers_present_on_success: GET / -> 200 carries
+  X-Content-Type-Options=nosniff, X-Frame-Options=DENY, a CSP with default-src
+  'self', HSTS max-age=63072000, Referrer-Policy=strict-origin-when-cross-origin,
+  and a Permissions-Policy (camera=() etc.). (Also covers the root endpoint.)
+- test_security_headers_present_on_error: GET /users/myprofile with no token ->
+  401 still carries the hardening headers (they ride error responses too).
+
+[ READS / WRITES / LOGS ]
+async_client runs create_all. The unauthenticated 401 is selected by the audit
+policy and writes an audit_logs row; the successful root GET is not audited.
+
+[ RELATIONS ]
+Exercises: core.middleware.SecurityHeadersMiddleware, app.main (root route).
+Uses:      conftest.async_client.
+
+[ NOTES / GOTCHAS ]
+Guards against the middleware being removed/reordered — the feature otherwise had
+no committed coverage. It proves headers on a returned 200 and handled 401 only;
+it does not establish headers on unhandled propagated exceptions. Redis is not
+used by these two requests, but configured Postgres is required by the fixture
+and audit side effect.

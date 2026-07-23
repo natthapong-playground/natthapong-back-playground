@@ -67,3 +67,5 @@ Thumbs.db
 # =========================
 *.txt
 !requirements.txt
+!structures.txt
+!codebase-docs/*.txt

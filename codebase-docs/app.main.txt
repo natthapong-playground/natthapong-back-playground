@@ -1,0 +1,56 @@
+================================================================================
+FILE:        app/main.py
+LAYER:       entrypoint
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+This is the front door of the backend. When the server starts, this file builds
+the web application, connects to the database and Redis, turns on the audit
+logger and the security-headers stamper, and registers all the URL groups
+(login, users, audit logs, countries, and clock). If this file does not run,
+nothing else does.
+
+[ TECHNICAL ]
+Creates the FastAPI() instance. Uses an async `lifespan` context manager to, on
+startup: create all SQL tables (Base.metadata.create_all) and ping Redis; on
+shutdown: close Redis and dispose the DB engine. Imports the model modules so
+their tables are registered on Base before create_all runs. Adds middleware and
+mounts routers under settings.API_V1_STR.
+
+[ METHODS / SYMBOLS ]
+- lifespan(app)  (async context manager)
+    Plain: Startup/shutdown chores — open DB+Redis, then clean them up.
+    Tech:  create_all on the engine; Redis ping; yields; on shutdown calls
+           close_redis_client and engine.dispose. No scheduler is started.
+- app  (FastAPI instance)
+    Plain: The application object the server runs.
+    Tech:  title/openapi_url from settings; lifespan attached.
+- root()  ->  GET /
+    Plain: A simple welcome message to confirm the API is alive.
+    Tech:  returns {"message", "project"}; not audited (non-mutating, non-sensitive).
+- health()  ->  GET /health
+    Plain: Readiness probe — says whether the DB and Redis are reachable.
+    Tech:  runs SELECT 1 on the engine and PINGs Redis; returns
+           {status, database, redis} with 200 when both healthy, else 503.
+           For Docker/monitoring health checks.
+
+[ READS / WRITES / LOGS ]
+Reads: settings (env). Writes: creates the users and audit_logs SQL tables at
+startup. Logs: prints two database-startup messages to stdout; installs
+AuditLogMiddleware, which writes audit_logs rows for handled responses selected
+by the audit policy.
+
+[ RELATIONS ]
+Called by: the ASGI server (uvicorn) and tests (conftest imports `app`).
+Calls:     core.config, core.redis_client, core.middleware, models.base,
+           models.user_model, models.audit_log_model, and controllers
+           (auth_routes, user_routes, audit_routes, countries_routes,
+           clock_routes).
+
+[ NOTES / GOTCHAS ]
+Middleware order matters: AuditLogMiddleware then SecurityHeadersMiddleware are
+added BEFORE CORSMiddleware so CORS stays the outermost layer and still decorates
+handled error responses. Propagated exceptions do not produce a response inside
+these custom middleware dispatch methods. SecurityHeadersMiddleware
+(CSP/HSTS/nosniff/X-Frame) lives in core.middleware.

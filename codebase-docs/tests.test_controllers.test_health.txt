@@ -1,0 +1,28 @@
+================================================================================
+FILE:        tests/test_controllers/test_health.py
+LAYER:       test
+LAST-SYNCED: 2026-06-09
+================================================================================
+
+[ PLAIN ENGLISH ]
+Checks the /health readiness probe reports everything is up when the database and
+Redis are reachable.
+
+[ TECHNICAL ]
+Async httpx test against the live app. With Postgres + Redis running (as the
+conftest fixture requires), /health must return 200 and flag both deps healthy.
+
+[ METHODS / SYMBOLS ]
+- test_health_reports_ok: GET /health -> 200 with
+  {status:"ok", database:true, redis:true}.
+
+[ READS / WRITES / LOGS ]
+None directly; the endpoint runs SELECT 1 + a Redis PING under the hood.
+
+[ RELATIONS ]
+Exercises: app.main.health (engine + redis_client).
+Uses:      conftest.async_client.
+
+[ NOTES / GOTCHAS ]
+Only the healthy (200) path is asserted; the degraded 503 path would require
+taking a dependency down mid-test, which the shared-infra harness can't safely do.

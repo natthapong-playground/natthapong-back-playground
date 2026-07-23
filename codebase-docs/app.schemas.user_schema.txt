@@ -1,0 +1,41 @@
+================================================================================
+FILE:        app/schemas/user_schema.py
+LAYER:       schema
+LAST-SYNCED: 2026-06-07
+================================================================================
+
+[ PLAIN ENGLISH ]
+This defines what user data is allowed IN (when registering) and what goes OUT
+(when returning a profile). It enforces a valid email, a minimum password length,
+and a fixed list of allowed roles — and it deliberately never sends the password
+back.
+
+[ TECHNICAL ]
+Pydantic models split request vs response. RoleType is a Literal whitelist.
+
+[ METHODS / SYMBOLS ]
+- RoleType
+    Plain: The only allowed roles.
+    Tech:  Literal["Guest","Regular","Admin","SuperAdmin"].
+- UserBase
+    Plain: The fields common to in/out.
+    Tech:  email (EmailStr), role (RoleType, default "Regular").
+- UserCreate(UserBase)
+    Plain: What you send to register (adds a password).
+    Tech:  password (str, min_length=8).
+- UserResponse(UserBase)
+    Plain: What the API returns about a user — no password.
+    Tech:  adds id, is_active, created_at, updated_at; Config.from_attributes=True
+           to read from the ORM object.
+
+[ READS / WRITES / LOGS ]
+None — validation/serialization only.
+
+[ RELATIONS ]
+Called by: controllers.user_routes, services.user_service.
+Calls:     pydantic.
+
+[ NOTES / GOTCHAS ]
+Role validation lives HERE (not in the DB). Invalid email/short password/bad
+role all produce a 422 before the handler runs. Config uses the older class-based
+style (Pydantic v2 deprecation warning) — matches token/audit schemas.

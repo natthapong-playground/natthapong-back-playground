@@ -1,0 +1,464 @@
+################################################################################
+#                                                                              #
+#   codebase-docs/  —  KNOWLEDGE BASE  (the concepts & tech behind the code)   #
+#                                                                              #
+################################################################################
+LAST-SYNCED: 2026-07-23
+
+PURPOSE
+-------
+`_INDEX.txt` tells you WHERE each file is and WHAT it does, one doc per file.
+This file is different: it is the WHY and the HOW — the cross-cutting knowledge,
+technologies, and design patterns this backend is built on, gathered in one
+place. Read this when you want to understand the system as a whole (or are new to
+it) rather than chase a single file. Like the per-file docs, every section is
+written for two audiences:
+
+    [ PLAIN ENGLISH ]  — a non-engineer can follow the idea and why it matters.
+    [ TECHNICAL ]      — an engineer gets the precise mechanism and where it lives.
+
+How the three meta-docs relate:
+    structures.txt  = the MAP    (where files live, naming rules)
+    _INDEX.txt      = the GUIDE   (what each individual file does)
+    _KNOWLEDGE.txt  = the PRIMER  (the concepts that span many files)  <- you are here
+
+MAINTENANCE: when a concept below changes in the code (a new auth rule, a new
+storage system, a new layer), update the matching section here AND refresh the
+LAST-SYNCED date at the top. Keep it conceptual — specifics of one file belong in
+that file's per-file doc, not here.
+
+
+################################################################################
+#  1. WHAT THIS PROJECT IS                                                     #
+################################################################################
+
+[ PLAIN ENGLISH ]
+A backend (server) for a web application. It does the classic account work —
+register, log in, log out, view your profile — and also powers a "World Clock"
+feature that shows the current local time in countries around the world. Behind
+the scenes it keeps a security diary (an audit log) of important actions, and it
+defends itself against password-guessing and signup spam.
+
+[ TECHNICAL ]
+A FastAPI (async Python) REST API with three concerns:
+  - AUTH / accounts: JWT-based login with access+refresh tokens, bcrypt password
+    hashing, role-based access, Redis-backed token revocation and rate limiting.
+  - WORLD CLOCK: a static dataset of ~252 countries -> live, DST-correct local
+    time computed on demand (no times are ever stored).
+  - OBSERVABILITY / SECURITY: an audit-log middleware records mutations and
+    failures; a security-headers middleware hardens handled responses returned
+    through the middleware stack.
+PostgreSQL is the database (via async SQLAlchemy); Redis is the shared fast store
+for cross-request state. An Angular frontend and an Nginx load balancer are
+described in structures.txt but are planned, not in this repo yet.
+
+
+################################################################################
+#  2. TECH STACK (the tools we use and why)                                    #
+################################################################################
+
+[ PLAIN ENGLISH ]
+Each tool below does one job. You don't need to know them all to read the code,
+but knowing the role of each makes everything click faster.
+
+[ TECHNICAL ]
+  FastAPI .............. async web framework; routing, validation, dependency
+                         injection, auto OpenAPI docs. (app/main.py, controllers)
+  Starlette ............ the ASGI toolkit under FastAPI; we use its
+                         BaseHTTPMiddleware directly for our middleware.
+  Pydantic v2 .......... request/response models + validation; camelCase wire
+                         aliasing; EmailStr; Literal role enums. (app/schemas)
+  pydantic-settings .... typed .env parsing; fail-fast config. (app/core/config.py)
+  SQLAlchemy (async) ... ORM + async engine/sessions over asyncpg. (app/models)
+  PostgreSQL ........... the relational database (users, audit_logs).
+  Redis (redis.asyncio)  fast shared store: token denylist + login/register
+                         rate-limit counters.
+  python-jose .......... JWT encode/decode (HS-family signing). (app/core/security)
+  bcrypt ............... password hashing (salted, slow-by-design).
+  zoneinfo + tzdata .... IANA timezone math for DST-correct offsets. (timezone svc)
+  httpx + pytest + pytest-asyncio .. async test client + test runner. (tests/)
+  uvicorn .............. the ASGI server that actually runs the app.
+  Docker / docker-compose .. PostgreSQL + Redis today; app replicas + Nginx planned.
+
+See requirements.txt for exact packages and pytest.ini for the async test config.
+
+
+################################################################################
+#  3. ARCHITECTURE: STRICT LAYERING                                            #
+################################################################################
+
+[ PLAIN ENGLISH ]
+The code is organised in layers, like a kitchen: the waiter (controller) only
+takes orders, the chef (service) does the actual cooking, the pantry (model) is
+where ingredients live, and the menu (schema) defines exactly what can be ordered
+and what comes back. Keeping these jobs separate means each part stays small and
+easy to change without breaking the others.
+
+[ TECHNICAL ]
+Dependency direction flows strictly downward; lower layers never import upward.
+
+  controllers (app/api/controllers/*_routes.py)
+      Routing/HTTP only: parse request, call a service, shape the HTTP response
+      (status codes, HTTPException). NO business logic. Thin by rule.
+        |
+        v
+  services (app/services/*_service.py)
+      The brains. All domain logic: authentication, rate-limit policy, audit
+      keep/skip policy, timezone math, dataset search. Stateless functions that
+      take a db/redis handle as an argument.
+        |
+        v
+  models (app/models/*_model.py)  +  data (app/data/*.json)
+      SQLAlchemy entities = the physical DB tables. Static JSON = reference data.
+
+  schemas (app/schemas/*_schema.py)  [cross-cuts controllers <-> services]
+      Pydantic validation/serialization: the request vs response contract.
+
+  core (app/core/*)
+      Cross-cutting plumbing: config, security primitives, the Redis singleton,
+      the middleware. Used by every layer.
+
+RULE OF THUMB: if you're tempted to put an `if`/business decision in a
+controller, it belongs in a service. structures.txt is the authoritative map;
+this layering is enforced by convention + CLAUDE.md.
+
+
+################################################################################
+#  4. AUTHENTICATION & THE TWO-TOKEN MODEL                                     #
+################################################################################
+
+[ PLAIN ENGLISH ]
+When you log in you get two "tickets": a short-lived ACCESS ticket you show on
+every request, and a long-lived REFRESH ticket whose only job is to get you a
+fresh access ticket when the old one expires — so you don't have to retype your
+password constantly. Logging out, or using a refresh ticket, "burns" the old
+ticket so nobody can reuse it in the normal app-issued-token flow. Current edge
+cases for specially signed tokens without expected claims are described below.
+
+[ TECHNICAL ]
+JWTs signed with settings.SECRET_KEY/ALGORITHM (app/core/security.py). Every
+token carries three claims beyond the payload:
+  - exp  : expiry (access = ACCESS_TOKEN_EXPIRE_MINUTES, refresh = REFRESH_...).
+  - jti  : a uuid4 unique id — the handle the revocation denylist keys on.
+  - type : "access" | "refresh" — the linchpin of the model.
+
+The `type` claim is enforced, not decorative:
+  - get_current_user (app/api/dependencies.py) rejects anything whose
+    type != "access" -> a refresh token can NEVER act as an access token.
+  - POST /refresh-token rejects anything whose type != "refresh".
+
+Current caveat: get_current_user only checks Redis when a `jti` is present. A
+validly signed access token with `sub` and type="access" but no `jti` is accepted
+and cannot be checked against the denylist. Tokens created by core.security do
+always contain a `jti`.
+
+Token payload also carries `sub` (email) and `role` (set in auth_routes).
+Login flow: authenticate_user -> _issue_tokens -> {access_token, refresh_token,
+token_type:"bearer"} (schemas.token_schema.Token).
+
+REFRESH ROTATION (auth_routes.refresh_access_token): a normal generated refresh
+token is verified, then revoked (its jti added to the denylist), and a brand new
+pair is issued. Rotation only calls revoke_token when `exp` is present; a custom
+validly signed refresh token with no `exp` can therefore be accepted without
+being burned. Tokens created by core.security always contain `exp`.
+
+Related docs: app.core.security, app.api.dependencies, app.api.controllers.auth_routes.
+
+
+################################################################################
+#  5. TOKEN REVOCATION (the Redis denylist)                                    #
+################################################################################
+
+[ PLAIN ENGLISH ]
+JWTs normally can't be "cancelled" before they expire — that's their weakness.
+We fix that with a denylist: a list of ticket-ids that are no longer allowed.
+Logging out or rotating a refresh token adds its id to this list; protected
+requests check the list when their token contains an id.
+
+[ TECHNICAL ]
+app/services/auth_service.py, backed by Redis:
+  - revoke_token(r, jti, exp): SET denylist:<jti> = "1" with TTL = (exp - now).
+    The key auto-expires exactly when the token would have expired anyway, so the
+    denylist never grows unbounded — no cleanup job needed.
+  - is_token_revoked(r, jti): EXISTS denylist:<jti>.
+Checked in get_current_user (access, when `jti` exists) and refresh_access_token
+(refresh, where `jti` is required). Logout decodes its bearer token with
+verify_exp=False, but does not require type="access", `sub`, `jti`, or an active
+user. It returns success for any validly signed bearer JWT; revocation is a no-op
+without a usable jti/exp or when the token is already expired. If the optional
+body contains a valid, unexpired refresh token, logout burns that token too;
+malformed, wrong-type, or expired optional refresh tokens are silently ignored.
+
+
+################################################################################
+#  6. ROLE-BASED ACCESS CONTROL (RBAC)                                         #
+################################################################################
+
+[ PLAIN ENGLISH ]
+Not every logged-in user can do everything. Users have a role; some endpoints are
+restricted to certain roles (e.g. only a SuperAdmin can read the audit log).
+
+[ TECHNICAL ]
+Roles are a fixed set (schemas.user_schema.RoleType):
+  "Guest" | "Regular" | "Admin" | "SuperAdmin"; new users default to "Regular".
+require_roles(*allowed) (app/api/dependencies.py) is a dependency FACTORY: it
+returns a dependency that runs get_current_user first (401 path) and then raises
+403 unless current_user.role is in the allowed set. Example:
+    _: User = Depends(require_roles("SuperAdmin"))   # audit_routes
+Layering note: get_current_user owns the 401 cases; require_roles only adds 403.
+
+KNOWN GAP (documented, not a bug to "fix" silently): POST /users/register
+currently accepts any role in the payload, including SuperAdmin — there is no
+admin-only guard on account creation yet. (See user_routes doc NOTES.)
+
+
+################################################################################
+#  7. RATE LIMITING (brute-force & spam defence)                              #
+################################################################################
+
+[ PLAIN ENGLISH ]
+Two protections: (a) after too many wrong passwords from the same account+device,
+login is locked for a while; (b) a single internet address can only create so
+many accounts in a window, to stop signup spam. Both reset/expire on their own.
+
+[ TECHNICAL ]
+app/services/rate_limit_service.py — Redis INCR counters with a TTL window:
+  - LOGIN guard: key login_fail:<email>|<ip>. Counts ONLY failed attempts;
+    is_login_blocked once count >= LOGIN_RATE_LIMIT_MAX_ATTEMPTS; a SUCCESSFUL
+    login clears the counter; inactive-account/correct logins don't increment.
+    Over-limit -> HTTP 429 with a Retry-After header (from the key's TTL).
+  - REGISTER throttle: key register_attempt:<ip>. Counts each non-blocked,
+    schema-validated request that enters the registration handler, including
+    duplicate-email requests. Schema-invalid 422 requests do not enter the
+    handler and are not counted. Over-limit -> 429 + Retry-After.
+The window is set on first hit (INCR -> if count==1 then EXPIRE), so the counter
+self-expires. Limits/windows come from settings (app/core/config.py). Client IP
+is proxy-aware (first X-Forwarded-For entry, else request.client.host).
+
+
+################################################################################
+#  8. MIDDLEWARE (cross-cutting request wrappers)                              #
+################################################################################
+
+[ PLAIN ENGLISH ]
+Middleware wraps requests automatically. We have two: a security camera that
+records important handled outcomes, and a stamper that adds browser-safety
+headers to replies returned through it.
+
+[ TECHNICAL ]
+app/core/middleware.py — two Starlette BaseHTTPMiddleware classes:
+  - AuditLogMiddleware: times the request, sees the final status code of a
+    returned response (including handled errors), and if
+    audit_service.should_log says so, writes one audit_logs row. It opens its OWN
+    DB session (never the request's, which may be rolled back) and swallows all
+    logging errors so logging can never break a request. Records metadata only —
+    never request bodies — so passwords stay out.
+  - SecurityHeadersMiddleware: sets fixed hardening headers on each returned
+    response:
+    X-Content-Type-Options=nosniff, X-Frame-Options=DENY, a Content-Security-
+    Policy, Strict-Transport-Security (HSTS, 2y preload), Referrer-Policy, and a
+    locked-down Permissions-Policy.
+
+ORDER MATTERS (app/main.py): Audit then SecurityHeaders are added BEFORE CORS, so
+CORSMiddleware stays the OUTERMOST configured layer and decorates handled error
+responses.
+(Starlette applies the last-added middleware outermost.)
+If `call_next` propagates an unhandled exception, neither custom middleware gets
+a response to decorate or audit; no guarantee is made for that path.
+
+
+################################################################################
+#  9. AUDIT LOGGING POLICY (what gets recorded)                               #
+################################################################################
+
+[ PLAIN ENGLISH ]
+We don't log everything (that would be noise and could leak data). We log the
+things that matter: anything that CHANGES data, anything that FAILS, and reads of
+genuinely sensitive endpoints.
+
+[ TECHNICAL ]
+audit_service.should_log(method, path, status) keeps a request when:
+  1. method is mutating (POST/PUT/PATCH/DELETE), OR
+  2. status_code >= 400 (every failure, including GET 401/403/422), OR
+  3. it's a GET under a SENSITIVE_GET_PREFIXES path (currently /audit-logs).
+Otherwise it's dropped — so successful plain GETs (/countries, /clock,
+/myprofile) are NOT logged. Each kept row (models.audit_log_model.AuditLog)
+denormalizes the actor (email/role/id) plus method/path/status/ip/user-agent/
+duration/request-id. SuperAdmin reads them via GET /audit-logs (audit_routes),
+filterable + paginated (skip/limit, limit<=200).
+
+
+################################################################################
+#  10. ASYNC DATABASE ACCESS                                                   #
+################################################################################
+
+[ PLAIN ENGLISH ]
+The server talks to the database without blocking — while one request waits for
+the DB, the server can handle others. Each request borrows a short-lived
+connection and gives it back when done.
+
+[ TECHNICAL ]
+app/models/base.py: create_async_engine(DATABASE_URL) (asyncpg driver) +
+async_sessionmaker(expire_on_commit=False) = AsyncSessionLocal.
+  - Routes get a per-request session via the get_db() dependency (async generator
+    that opens/yields/closes a session).
+  - The audit middleware uses its OWN AsyncSessionLocal, independent of the
+    request session.
+Schema is created at startup via Base.metadata.create_all in the lifespan handler
+(app/main.py) — there is NO migration tool (Alembic) yet; model modules are
+imported in main.py so their tables register on Base before create_all runs.
+Tables: users (user_model), audit_logs (audit_log_model); both timezone-aware
+timestamps defaulted in Python (datetime.now(timezone.utc)).
+
+
+################################################################################
+#  11. CONFIGURATION (fail-fast .env)                                          #
+################################################################################
+
+[ PLAIN ENGLISH ]
+All the knobs (database address, secret key, token lifetimes, rate limits) come
+from a .env file. If a required setting is missing, the app refuses to start —
+loud failure now beats mysterious misbehaviour later.
+
+[ TECHNICAL ]
+app/core/config.py: a pydantic-settings BaseSettings subclass with NO defaults,
+so a missing env var raises at import time. Instantiated once into the module
+singleton `settings`, imported everywhere. .env.example is the committed template;
+.env holds the real values. The JWT secret is SECRET_KEY (not JWT_SECRET). Because
+there are no defaults, tests and Docker must supply a COMPLETE .env.
+
+
+################################################################################
+#  12. SCHEMAS & THE WIRE CONTRACT                                            #
+################################################################################
+
+[ PLAIN ENGLISH ]
+Schemas are the strict definition of what the API accepts and returns. They also
+translate between the Python style (snake_case) and the JavaScript style
+(camelCase) the frontend prefers, and they make sure secrets like password hashes
+never leak out.
+
+[ TECHNICAL ]
+Pydantic v2 models in app/schemas. Patterns in use:
+  - Request vs response split: UserCreate (in, password min_length=8) vs
+    UserResponse (out, from_attributes=True, never includes hashed_password).
+  - Enumerated roles via Literal (RoleType).
+  - EmailStr validation on email fields.
+  - camelCase wire aliasing: CountrySchema/ClockSnapshotSchema use
+    ConfigDict(alias_generator=to_camel, populate_by_name=True) — Python attrs
+    stay snake_case (utc_offset_minutes) but JSON goes out camelCase
+    (utcOffsetMinutes). This is the contract the Angular client consumes.
+  - Token / RefreshRequest: the auth payload shapes.
+
+
+################################################################################
+#  13. WORLD-CLOCK DOMAIN (timezones done right)                              #
+################################################################################
+
+[ PLAIN ENGLISH ]
+We never store what time it is anywhere — we compute it fresh each time, so it's
+always correct, including daylight-saving changes. The country list stores only a
+code, a name, and one representative timezone; the offset and label are worked out
+live.
+
+[ TECHNICAL ]
+  - app/data/countries.json: exactly 252 rows {code, name, timezone(IANA)}.
+    Full ISO 3166-1 plus the 4 UK home nations and Kosovo (treated as plain lookup
+    keys). Offsets are NEVER stored.
+  - country_service: loads the dataset once via lru_cache (_records / _by_code);
+    search_countries (name contains, case-folded, limit-capped), get_country (by
+    code, 404 if unknown), build_snapshot (many codes -> one shared "now").
+  - timezone_service.build_country: ZoneInfo(tz) + reference_utc.astimezone(tz) ->
+    utc_offset_minutes, a "UTC+HH:MM" label, and ISO local_time. DST-correct
+    because the offset is derived from the actual reference instant.
+  - ONE reference instant per request (build_snapshot) guarantees countries with
+    the same offset always show the same time (spec correction C1). Unknown codes
+    are skipped silently by design, not 400/404 (in the batch /clock endpoint).
+  - Endpoints (countries_routes, clock_routes) require auth (router-level
+    Depends(get_current_user)). /clock takes a single comma-separated `code` query
+    param (e.g. ?code=TH,GB,DE).
+
+
+################################################################################
+#  14. TESTING APPROACH                                                        #
+################################################################################
+
+[ PLAIN ENGLISH ]
+Automated tests hit the API the way a real client would and check the responses.
+They cover happy paths and tricky edges including lockouts, expired/forged
+tokens, access-control blocks, and security headers on handled responses.
+
+[ TECHNICAL ]
+pytest + pytest-asyncio, async httpx client against the ASGI app (tests/conftest.py
+provides the client + auth_headers fixtures). Coverage by file:
+  test_auth/login/users ... register, login branches, profile, logout flows
+  test_refresh ............ refresh rotation + access/refresh type separation
+  test_rate_limit ......... login lockout + reset-on-success
+  test_audit .............. access control + should_log policy
+  test_countries/clock .... search/lookup/404/camelCase + clock auth/order/skip/422
+  test_security_headers ... hardening headers on success + handled 401 response
+  test_health ............. /health readiness probe (DB + Redis)
+CAVEAT (conftest doc): tests run against a SHARED real Postgres/Redis with no
+per-test teardown. UUID emails and per-test source IPs reduce collisions, but
+tests still create users/audit rows and Redis register/login/denylist state.
+
+
+################################################################################
+#  15. SECURITY MODEL — AT A GLANCE                                            #
+################################################################################
+
+[ PLAIN ENGLISH ]
+A quick checklist of how the system protects itself.
+
+[ TECHNICAL ]
+  Passwords ........ bcrypt-hashed (salted), never stored or logged in plaintext.
+  Sessions ......... short access token + rotating single-use refresh token.
+  Revocation ....... Redis denylist keyed on jti, auto-expiring at token exp.
+  Token confusion .. `type` claim stops refresh-as-access misuse.
+  Brute force ...... per-(account+IP) failed-login lockout (429 + Retry-After).
+  Signup spam ...... per-IP register throttle.
+  Browser hardening  CSP / HSTS / nosniff / X-Frame-Options / Permissions-Policy
+                     on responses returned through the middleware.
+  Authorization .... role checks via require_roles (e.g. SuperAdmin-only audit).
+  Auditability ..... mutations + failures + sensitive reads recorded.
+  CORS ............. restricted to settings.ORIGINS_API.
+  OPEN GAPS ........ register accepts arbitrary role; missing-jti access tokens
+                     bypass denylist lookup; refresh rotation relies on exp;
+                     tests share real infra with no teardown.
+
+
+################################################################################
+#  16. PLANNED / NOT-YET-IMPLEMENTED (don't assume these exist)               #
+################################################################################
+
+[ PLAIN ENGLISH ]
+A few pieces are designed and mentioned in the project map but are NOT in this
+repo yet — don't rely on them.
+
+[ TECHNICAL ]
+  - app/websockets/ (chat_manager) — real-time layer, planned only.
+  - nginx/ round-robin load balancer + 3x FastAPI replicas — planned; current
+    docker-compose runs PostgreSQL + Redis only.
+  - The Angular frontend-client-repo — a separate repo, described in
+    structures.txt for context.
+  - DB migrations (Alembic) — none; schema is create_all at startup.
+See structures.txt for the full intended end-state.
+
+
+################################################################################
+#  GLOSSARY (quick reference)                                                  #
+################################################################################
+  JWT ........ JSON Web Token: a signed, self-contained "ticket" proving identity.
+  jti ........ JWT ID: the per-token unique id used to revoke a single token.
+  exp ........ JWT expiry timestamp.
+  access tok . short-lived token sent on every protected request.
+  refresh tok  long-lived, single-use token that mints a new access token.
+  denylist ... Redis set of revoked jti's, checked on every protected request.
+  bcrypt ..... slow, salted password-hashing algorithm.
+  RBAC ....... Role-Based Access Control (Guest/Regular/Admin/SuperAdmin).
+  middleware . code wrapping every request (audit logging, security headers).
+  ASGI ....... the async server interface FastAPI/Starlette/uvicorn speak.
+  IANA tz .... canonical timezone names (e.g. "Europe/London") with DST rules.
+  DST ........ Daylight Saving Time — why offsets must be computed, not stored.
+  lru_cache .. in-memory cache; here it loads countries.json once per process.
+  audit log .. the recorded trail of mutations, failures, and sensitive reads.

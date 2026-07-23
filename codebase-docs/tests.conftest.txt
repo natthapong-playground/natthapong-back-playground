@@ -1,0 +1,47 @@
+================================================================================
+FILE:        tests/conftest.py
+LAYER:       test
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+This is the shared test setup. It makes sure the database tables exist and gives
+every test a ready-to-use HTTP client wired directly to the app (no real network),
+plus a shortcut that hands a test a valid "logged-in" Authorization header.
+
+[ TECHNICAL ]
+Pytest fixtures using httpx.AsyncClient over ASGITransport against app.main.app.
+
+[ METHODS / SYMBOLS ]
+- async_client (fixture)
+    Plain: An HTTP client tests use to call the API, tagged with a unique
+           source IP so rate-limit counters don't leak between tests.
+    Tech:  runs Base.metadata.create_all, then yields an AsyncClient on
+           ASGITransport(app) with base_url http://testserver and a per-test
+           random X-Forwarded-For header (isolates per-IP/per-account rate-limit
+           keys in the shared Redis, across tests and runs).
+- auth_headers (fixture)
+    Plain: A ready Authorization header for a freshly-registered, logged-in
+           Regular user — for any endpoint that just needs a valid token.
+    Tech:  depends on async_client; POSTs /users/register then /login with a
+           uuid-unique email; returns {"Authorization": "Bearer <access_token>"}.
+
+[ READS / WRITES / LOGS ]
+Writes: async_client runs create_all. auth_headers creates one user and audit
+rows through registration/login, increments the per-IP Redis registration
+counter, and clears that email/IP login-failure key on successful login. The
+denylist is untouched. Uses the configured real Postgres and Redis.
+
+[ RELATIONS ]
+Called by: every test module (async_client); token-only endpoint tests
+           (auth_headers), e.g. country/clock suites.
+Calls:     app.main.app, models.base (engine, Base), models.user_model; the
+           /users/register and /login routes (auth_headers).
+
+[ NOTES / GOTCHAS ]
+Known limitation: tables and rows are never dropped between tests and the real
+shared DB/Redis are used (no ephemeral isolation). Random UUID emails and a
+random per-test source IP reduce collisions but do not remove side effects.
+Improving this (isolated/ephemeral test infrastructure) is a known TODO.
+auth_headers reads only the access_token from the login response (login now also
+returns a refresh_token, which this fixture ignores).

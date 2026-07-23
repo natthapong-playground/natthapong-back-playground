@@ -1,0 +1,35 @@
+================================================================================
+FILE:        app/schemas/token_schema.py
+LAYER:       schema
+LAST-SYNCED: 2026-06-09
+================================================================================
+
+[ PLAIN ENGLISH ]
+This describes the shapes of the auth payloads: the login/refresh response (an
+access ticket, a refresh ticket, and the type) and the small request body the
+client sends when asking for a fresh access ticket.
+
+[ TECHNICAL ]
+Pydantic models. Token is the response_model for POST /login and
+POST /refresh-token; RefreshRequest is the request body for POST /refresh-token.
+
+[ METHODS / SYMBOLS ]
+- Token (class)
+    Plain: The auth response: both tickets plus their type.
+    Tech:  fields: access_token (str), refresh_token (str), token_type (str).
+- RefreshRequest (class)
+    Plain: The body a client posts to swap a refresh ticket for new ones (also
+           sent at logout to kill the refresh ticket).
+    Tech:  field: refresh_token (str). Used by POST /refresh-token (required body)
+           and POST /logout (optional body).
+
+[ READS / WRITES / LOGS ]
+None — pure serialization.
+
+[ RELATIONS ]
+Called by: controllers.auth_routes (response_model + request body).
+Calls:     pydantic.
+
+[ NOTES / GOTCHAS ]
+token_type is always "bearer" in current code. Both /login and /refresh-token
+return the same Token shape (access + refresh), so refresh rotates both tickets.

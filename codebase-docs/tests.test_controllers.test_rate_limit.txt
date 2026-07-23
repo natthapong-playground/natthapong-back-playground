@@ -1,0 +1,37 @@
+================================================================================
+FILE:        tests/test_controllers/test_rate_limit.py
+LAYER:       test
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+Checks the login bouncer: after enough wrong passwords the account+device is
+locked out (even a correct password is refused), and a successful login before the
+limit clears the slate so honest users aren't punished.
+
+[ TECHNICAL ]
+Async httpx tests against the real ASGI app (shared Postgres/Redis). Reads the
+threshold from settings.LOGIN_RATE_LIMIT_MAX_ATTEMPTS so the tests track config.
+Requires DB + Redis to run.
+
+[ METHODS / SYMBOLS ]
+- test_login_locks_out_after_max_failures: MAX_ATTEMPTS wrong passwords each ->
+  401; the next attempt -> 429 with a Retry-After header; a correct password
+  while locked -> still 429.
+- test_successful_login_resets_failure_counter: MAX_ATTEMPTS-1 failures (401), a
+  correct login (200) that clears the counter, then a wrong password -> plain 401
+  (not 429).
+
+[ READS / WRITES / LOGS ]
+Reads/Writes: Redis `login_fail:` counters, Redis `register_attempt:` counters,
+users rows, and audit_logs rows via the real endpoints. Created rows remain in
+the shared DB; login-failure keys are cleared on success or expire by TTL.
+
+[ RELATIONS ]
+Exercises: controllers.auth_routes (/login), services.rate_limit_service.
+Uses:      conftest.async_client.
+
+[ NOTES / GOTCHAS ]
+uuid-unique emails isolate each test's counter in shared Redis; leftover keys
+auto-expire after the window. Needs live Postgres + Redis; skipped/failing if the
+infrastructure is down.

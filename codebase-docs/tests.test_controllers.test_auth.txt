@@ -1,0 +1,47 @@
+================================================================================
+FILE:        tests/test_controllers/test_auth.py
+LAYER:       test
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+These tests check the core account flows end to end: registering, viewing your
+profile, and that logging out really kills your ticket.
+
+[ TECHNICAL ]
+Async controller tests via the async_client fixture. Helper _register_and_login
+returns a fresh token.
+
+[ METHODS / SYMBOLS ]
+- test_register_new_user .......... POST /register -> 201; response has id/
+                                    created_at; no hashed_password leaked.
+- test_get_personal_profile_success register+login, GET /myprofile -> 200, email
+                                    matches, no hashed_password.
+- test_get_personal_profile_unauthorized GET /myprofile without token -> 401
+                                    "Not authenticated".
+- test_logout_revokes_token ....... profile works, logout 200, then same token ->
+                                    401 (denylist hit). The only test of the
+                                    Redis revocation branch.
+- test_logout_invalid_token ....... logout with junk token -> 401.
+- test_logout_missing_token ....... logout with no token -> 401 "Not authenticated".
+- test_profile_rejects_token_without_sub validly-signed access token lacking 'sub'
+                                    on GET /myprofile -> 401 (dependencies no-sub branch).
+- test_profile_rejects_deleted_user register+login, delete the user in-DB, then
+                                    GET /myprofile -> 401 (dependencies user-is-None branch).
+
+[ READS / WRITES / LOGS ]
+Exercises the real app: writes users, sets/checks Redis denylist, and (as a side
+effect) produces audit_logs rows. Registration increments Redis per-IP counters;
+successful login clears its email/IP failure key. The deleted-user test directly
+deletes its user row; other created users remain in the shared DB.
+
+[ RELATIONS ]
+Calls (via HTTP): auth_routes, user_routes; also dependencies.get_current_user
+(no-sub / deleted-user branches). Uses conftest.async_client, core.security
+(create_access_token), models.base/user_model (direct delete).
+
+[ NOTES / GOTCHAS ]
+test_logout_revokes_token depends on live shared Redis (no fake) and checks the
+access-token denylist branch. Refresh-token denylist/rotation behavior is also
+covered in test_refresh.py. The two tests using second-resolution timestamps for
+emails can collide with existing shared-DB rows if rerun within the same second.

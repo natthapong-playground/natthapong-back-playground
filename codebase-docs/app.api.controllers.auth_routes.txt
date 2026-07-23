@@ -1,0 +1,77 @@
+================================================================================
+FILE:        app/api/controllers/auth_routes.py
+LAYER:       controller
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+This handles logging in, logging out, and renewing a session. Logging in checks
+the email/password and hands back two tickets (a short access ticket and a
+long-lived refresh ticket); too many wrong tries from the same account+device get
+temporarily locked out. Renewing swaps a valid refresh ticket for a fresh pair
+(normally killing the old refresh ticket so it can't be reused). Logging out
+attempts to revoke the bearer ticket and an optional refresh ticket, but currently
+accepts any validly signed bearer JWT rather than requiring an access ticket.
+
+[ TECHNICAL ]
+Thin controller. Delegates auth to user_service, brute-force counting to
+rate_limit_service, and token revocation to auth_service. Mounted at API_V1_STR
+(so /api/v1/login, /api/v1/refresh-token, /api/v1/logout).
+
+[ METHODS / SYMBOLS ]
+- _client_ip(request) -> str
+    Plain: The caller's IP (proxy-aware) for the rate-limit key.
+    Tech:  first X-Forwarded-For entry, else request.client.host, else "unknown".
+- _issue_tokens(email, role) -> dict
+    Plain: Build the {access, refresh, bearer} response.
+    Tech:  create_access_token + create_refresh_token on {sub, role}.
+- login_for_access_token(request, form_data, db, r)  ->  POST /login
+    Plain: Check credentials (with lockout) and return a fresh token pair.
+    Tech:  identifier = "<email>|<ip>". 429 (+Retry-After) if is_login_blocked;
+           403 on InactiveUserError; on bad creds record_login_failure then 401;
+           on success clear_login_failures and return _issue_tokens.
+- refresh_access_token(payload_in, db, r)  ->  POST /refresh-token
+    Plain: Swap a refresh ticket for a new pair; normal app-issued tickets are
+           burned, but a custom signed ticket without an expiry is not.
+    Tech:  decode RefreshRequest.refresh_token (401 on failure); 401 unless
+           type=="refresh" with sub & jti; 401 if jti revoked, or user missing/
+           inactive; if exp is present, revoke_token(old jti), then return
+           _issue_tokens (rotation).
+- _revoke_if_valid(r, raw_token, expected_type=None)
+    Plain: Best-effort kill of a token; ignores bad/unmatched ones.
+    Tech:  decodes raw_token (returns silently on JWTError or type mismatch);
+           revoke_token on its jti/exp. Used to revoke the refresh token at logout.
+- logout(body, token, r)  ->  POST /logout
+    Plain: Try to invalidate the bearer ticket and an optional refresh ticket,
+           even if the bearer ticket already expired.
+    Tech:  body is optional RefreshRequest. Decodes the bearer access token with
+           options={"verify_exp": False} so an EXPIRED-but-validly-signed token
+           still logs out (forged/malformed -> 401). It does not require an
+           access type, sub, jti, or current user. Revokes jti/exp when present
+           (no-op if past exp); if body.refresh_token is present,
+           _revoke_if_valid(expected_type="refresh") burns it too. Returns
+           {"message": "Successfully logged out."}.
+
+[ READS / WRITES / LOGS ]
+Reads: form creds / bearer token / refresh body (login, logout, refresh), users
+table, Redis (login-fail counter + denylist). Writes: Redis login-fail counter
+(login), Redis denylist key (logout revokes access + optional refresh; refresh
+rotation). Audited by middleware: POST /login, /refresh-token, /logout (and their
+failures).
+
+[ RELATIONS ]
+Called by: HTTP clients; router included in main.
+Calls:     services.user_service (authenticate_user, get_user_by_email),
+           services.auth_service (revoke_token, is_token_revoked),
+           services.rate_limit_service, core.security (create_access_token,
+           create_refresh_token), api.dependencies, schemas.token_schema.
+
+[ NOTES / GOTCHAS ]
+Only wrong-credential attempts (not inactive-account or correct logins) count
+toward the lockout; a success clears the counter. Refresh rotation revokes the
+presented refresh token when it has `exp`, so generated refresh tokens are
+single-use; a custom validly signed refresh token without `exp` is accepted but
+not revoked. Logout accepts any validly signed bearer JWT regardless of its
+`type` or `sub`; missing jti/exp and already-expired tokens cannot add a live
+denylist key. A missing, malformed, wrong-type, or expired optional refresh token
+does not block logout. Passwords are never logged (middleware records metadata).

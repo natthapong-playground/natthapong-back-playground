@@ -1,0 +1,50 @@
+================================================================================
+FILE:        app/services/rate_limit_service.py
+LAYER:       service
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+This is the bouncer for the auth doors. It counts attempts per key in a short
+window and, once there are too many, temporarily refuses more — slowing
+password-guessing on login and signup-spam on register. Login counters are wiped
+by a successful sign-in; both expire on their own so honest users recover.
+
+[ TECHNICAL ]
+Thin Redis fixed-window counters. A generic core (_count/_hit/_retry_after/_clear,
+keyed by prefix+identifier with auto-expiring keys) is wrapped by login and
+register helpers. Thresholds/windows come from settings. No SQL, no stdout logs.
+
+[ METHODS / SYMBOLS ]
+- _key / _count / _hit / _retry_after / _clear (private)
+    Plain: The shared counter machinery.
+    Tech:  GET / INCR(+EXPIRE on first hit) / TTL / DEL on "<prefix><identifier>".
+- is_login_blocked / record_login_failure / clear_login_failures /
+  get_retry_after (login, prefix "login_fail:")
+    Plain: Lock an account+IP after too many wrong passwords; clear on success.
+    Tech:  blocked at >= LOGIN_RATE_LIMIT_MAX_ATTEMPTS; window
+           LOGIN_RATE_LIMIT_WINDOW_SECONDS. Counts FAILED logins only.
+- is_register_blocked / record_register_attempt / get_register_retry_after
+  (register, prefix "register_attempt:")
+    Plain: Throttle signups from one IP.
+    Tech:  blocked at >= REGISTER_RATE_LIMIT_MAX_ATTEMPTS; window
+           REGISTER_RATE_LIMIT_WINDOW_SECONDS. user_routes records each
+           non-blocked, schema-validated request that enters its handler,
+           including duplicates; there is no clear helper.
+
+[ READS / WRITES / LOGS ]
+Reads/Writes: Redis keys under "login_fail:" and "register_attempt:". Reads
+settings (max attempts + windows). No SQL, no stdout logs.
+
+[ RELATIONS ]
+Called by: controllers.auth_routes (login flow),
+           controllers.user_routes (register flow).
+Calls:     redis client (passed in), core.config.
+
+[ NOTES / GOTCHAS ]
+Fixed window: the TTL is armed on the first hit and NOT refreshed, so the counter
+resets when it expires (or, for login, on any success). Login keys on email+IP so
+one attacker IP can't lock a victim elsewhere; register keys on IP alone (no
+account exists yet). Schema-invalid registration bodies fail before user_routes
+calls this service and therefore are not counted; already-blocked requests are
+not incremented further.

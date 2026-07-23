@@ -1,0 +1,44 @@
+================================================================================
+FILE:        app/schemas/country_schema.py
+LAYER:       schema
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+This describes the shape of a country (its name, timezone, current offset and
+local time) and the "clock snapshot" (a batch of countries plus the single
+moment they were all calculated from) as the World Timezone feature returns them
+to API clients.
+
+[ TECHNICAL ]
+Pydantic response models for the timezone feature. Python attributes are
+snake_case (our style); the JSON wire format is camelCase via a to_camel
+alias_generator, so the Angular contract (utcOffsetMinutes, localTime, ...) is
+honoured without renaming Python fields. FastAPI serializes responses by alias
+by default, so returning these models yields camelCase.
+
+[ METHODS / SYMBOLS ]
+- CountrySchema (class)
+    Plain: One country row: code, name, timezone, offset, and local time.
+    Tech:  Fields code, name, timezone, utc_offset_minutes, utc_offset_label,
+           local_time. There is no flag field. model_config = ConfigDict(
+           alias_generator=to_camel, populate_by_name=True).
+- ClockSnapshotSchema (class)
+    Plain: A batch of countries plus the one "now" they all share.
+    Tech:  reference_utc: str (-> referenceUtc), countries: list[CountrySchema].
+           Same alias config.
+
+[ READS / WRITES / LOGS ]
+None — serialization only.
+
+[ RELATIONS ]
+Called by: services.timezone_service (build_country returns CountrySchema),
+           services.country_service (build_snapshot returns ClockSnapshotSchema),
+           controllers.countries_routes / clock_routes (response_model).
+Calls:     pydantic.
+
+[ NOTES / GOTCHAS ]
+Wire format is camelCase here, unlike the snake_case users/audit endpoints — a
+deliberate choice to match the Angular spec. If the API is ever unified on one
+casing, drop the alias_generator. Offsets/local_time are NEVER stored; they are
+computed live (see timezone_service).

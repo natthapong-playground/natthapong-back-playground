@@ -1,0 +1,38 @@
+================================================================================
+FILE:        app/models/base.py
+LAYER:       model
+LAST-SYNCED: 2026-06-07
+================================================================================
+
+[ PLAIN ENGLISH ]
+This is the foundation for talking to the SQL database. It opens the database
+connection, provides a way to start a "session" (a unit of work), and defines
+the base that every table definition builds on.
+
+[ TECHNICAL ]
+SQLAlchemy async setup. Creates the async engine from DATABASE_URL, an
+async_sessionmaker (AsyncSessionLocal) with expire_on_commit=False, and the
+declarative Base shared by all models.
+
+[ METHODS / SYMBOLS ]
+- engine
+    Plain: The live connection pool to the database.
+    Tech:  create_async_engine(DATABASE_URL, echo=True).
+- AsyncSessionLocal
+    Plain: A factory that hands out database sessions.
+    Tech:  async_sessionmaker(engine, class_=AsyncSession,
+           expire_on_commit=False).
+- Base
+    Plain: The parent every table model inherits from.
+    Tech:  declarative_base(); its metadata is what create_all builds.
+
+[ READS / WRITES / LOGS ]
+Reads: settings.DATABASE_URL. Logs: echo=True prints SQL to stdout.
+
+[ RELATIONS ]
+Called by: every model, api.dependencies (get_db), middleware, main, tests.
+Calls:     sqlalchemy, core.config.
+
+[ NOTES / GOTCHAS ]
+expire_on_commit=False lets objects stay usable after commit (handy in async).
+echo=True is verbose — fine for dev, consider disabling in production.

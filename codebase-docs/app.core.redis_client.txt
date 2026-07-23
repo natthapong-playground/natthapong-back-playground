@@ -1,0 +1,35 @@
+================================================================================
+FILE:        app/core/redis_client.py
+LAYER:       core
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+This sets up the connection to Redis — a fast, temporary memory store the app
+uses for revoked-token IDs and login/registration rate-limit counters. It opens
+one shared connection the first time it's needed and reuses it everywhere.
+
+[ TECHNICAL ]
+Lazy module-level singleton over redis.asyncio. Built from settings.REDIS_URL
+with decode_responses=True (returns str, not bytes). Not a SQL store — it holds
+flat key/value pairs with optional TTL.
+
+[ METHODS / SYMBOLS ]
+- get_redis_client() -> redis.Redis
+    Plain: Hand back the shared Redis connection, creating it on first use.
+    Tech:  Initializes the module global `_redis_client` if None, else returns it.
+- close_redis_client() -> None  (async)
+    Plain: Close the connection cleanly when the app shuts down.
+    Tech:  awaits aclose() and resets the singleton to None.
+
+[ READS / WRITES / LOGS ]
+Reads: settings.REDIS_URL. Writes: nothing by itself (callers set keys).
+
+[ RELATIONS ]
+Called by: api.dependencies (get_redis), main (startup ping / shutdown close).
+Calls:     redis.asyncio, core.config.
+
+[ NOTES / GOTCHAS ]
+Singleton is process-local; with multiple app replicas each process has its own
+client but they all point at the SAME Redis server. Current application keys are
+the `denylist:`, `login_fail:`, and `register_attempt:` families.

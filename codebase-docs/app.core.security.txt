@@ -1,0 +1,52 @@
+================================================================================
+FILE:        app/core/security.py
+LAYER:       core
+LAST-SYNCED: 2026-06-09
+================================================================================
+
+[ PLAIN ENGLISH ]
+This is the security toolbox. It scrambles passwords so they're never stored in
+plain text, checks a typed password against the stored scramble, and creates the
+signed "login tickets" (JWTs) a user carries to prove who they are. There are two
+kinds of ticket: a short-lived access ticket for everyday calls, and a long-lived
+refresh ticket used only to get a fresh access ticket.
+
+[ TECHNICAL ]
+bcrypt for password hashing/verification; python-jose for JWT encode. Tokens
+embed an expiry (`exp`), a unique id (`jti`), and a `type` ("access" | "refresh")
+so they can be individually revoked (see auth_service denylist) and so a refresh
+token can never be used as an access token (enforced in dependencies and the
+refresh endpoint).
+
+[ METHODS / SYMBOLS ]
+- get_password_hash(password) -> str
+    Plain: Turn a plain password into a safe scrambled form.
+    Tech:  bcrypt.hashpw with a fresh gensalt; returns utf-8 string.
+- verify_password(plain, hashed) -> bool
+    Plain: Check a typed password against the stored scramble.
+    Tech:  bcrypt.checkpw; returns True/False.
+- _create_token(data, token_type, default_minutes, expires_delta=None)
+    Plain: Shared maker for any signed ticket.
+    Tech:  copies `data`, adds `exp` (now + default_minutes or given delta),
+           `jti` (uuid4), and `type`; jwt.encode with SECRET_KEY/ALGORITHM.
+- create_access_token(data, expires_delta=None)
+    Plain: Make a short-lived access ticket.
+    Tech:  _create_token with type="access", ACCESS_TOKEN_EXPIRE_MINUTES.
+- create_refresh_token(data, expires_delta=None)
+    Plain: Make a long-lived refresh ticket.
+    Tech:  _create_token with type="refresh", REFRESH_TOKEN_EXPIRE_MINUTES.
+
+[ READS / WRITES / LOGS ]
+Reads: settings (SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES,
+       REFRESH_TOKEN_EXPIRE_MINUTES). No DB/logs.
+
+[ RELATIONS ]
+Called by: services.user_service (hashing/verify), controllers.auth_routes
+           (create_access_token / create_refresh_token).
+Calls:     bcrypt, jose.jwt, core.config.
+
+[ NOTES / GOTCHAS ]
+Tokens carry `sub` (email) and `role` when created in auth_routes. The `jti` is
+what the logout/rotation denylist keys on. The `type` claim is required: access
+routes (dependencies.get_current_user) reject anything that is not "access", and
+/refresh-token rejects anything that is not "refresh".

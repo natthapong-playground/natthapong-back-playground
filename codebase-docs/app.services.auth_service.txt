@@ -1,0 +1,34 @@
+================================================================================
+FILE:        app/services/auth_service.py
+LAYER:       service
+LAST-SYNCED: 2026-06-07
+================================================================================
+
+[ PLAIN ENGLISH ]
+This manages "logged-out" tickets. When someone logs out, it remembers that
+their ticket is dead until it would have expired anyway, and it can quickly check
+whether a given ticket has been killed.
+
+[ TECHNICAL ]
+The Redis denylist for JWTs, keyed by the token's jti. Keys auto-expire so no
+cleanup job is needed.
+
+[ METHODS / SYMBOLS ]
+- revoke_token(r, jti, exp_ts) -> None  (async)
+    Plain: Mark this ticket dead until it would expire.
+    Tech:  ttl = exp_ts - now; if ttl > 0, SET denylist:<jti> = "1" EX ttl.
+- is_token_revoked(r, jti) -> bool  (async)
+    Plain: Has this ticket been killed?
+    Tech:  EXISTS denylist:<jti> == 1.
+
+[ READS / WRITES / LOGS ]
+Reads/Writes: Redis keys under "denylist:". No SQL, no stdout logs.
+
+[ RELATIONS ]
+Called by: controllers.auth_routes (revoke on logout), api.dependencies
+           (is_token_revoked on every authed request).
+Calls:     redis client (passed in).
+
+[ NOTES / GOTCHAS ]
+TTL == the token's remaining lifetime, so the denylist never outgrows the set of
+still-valid tokens. Tokens without jti/exp cannot be revoked.

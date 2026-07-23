@@ -1,0 +1,49 @@
+================================================================================
+FILE:        app/services/country_service.py
+LAYER:       service
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+This is the brains behind the country list. It loads the country dataset, lets
+you search it by name, look one up by its code, and build the batch "clock
+snapshot" that powers the screen — making sure every country on screen is timed
+from the exact same moment.
+
+[ TECHNICAL ]
+Data-access + orchestration service for the World Timezone feature. Loads
+app/data/countries.json (cached) and delegates all time math to
+timezone_service. Stateless; no DB. build_snapshot stamps ONE reference instant
+per request so the whole UI reconciles (spec corrections C1/C2).
+
+[ METHODS / SYMBOLS ]
+- _records() -> list[dict]   (lru_cache)
+    Plain: Load the country list from disk once.
+    Tech:  Reads app/data/countries.json (UTF-8). Cached.
+- _by_code() -> dict[str, dict]   (lru_cache)
+    Plain: An index of countries keyed by upper-case code.
+    Tech:  {code.upper(): record}.
+- search_countries(*, search, limit) -> list[CountrySchema]
+    Plain: Find countries whose name contains the query (or all of them).
+    Tech:  Case-insensitive substring match on name; slices to `limit`; builds
+           each with timezone_service for datetime.now(UTC).
+- get_country(code) -> CountrySchema | None
+    Plain: One country by its code, or nothing if unknown.
+    Tech:  Case-insensitive lookup; None if absent.
+- build_snapshot(codes) -> ClockSnapshotSchema
+    Plain: Build the batch list for several countries from one shared "now".
+    Tech:  One datetime.now(UTC) for all; preserves order; skips unknown codes;
+           returns reference_utc + countries.
+
+[ READS / WRITES / LOGS ]
+Reads: app/data/countries.json (cached). Writes: none. No DB.
+
+[ RELATIONS ]
+Called by: controllers.countries_routes, controllers.clock_routes.
+Calls:     services.timezone_service, schemas.country_schema, app/data/countries.json.
+
+[ NOTES / GOTCHAS ]
+Dataset contains 252 records with exactly code/name/timezone — flags and offsets
+are not stored. _records()/_by_code() are cached for the process lifetime; if
+countries.json changes you must restart (or clear the lru_cache). Unknown codes
+in /clock are silently skipped by design.

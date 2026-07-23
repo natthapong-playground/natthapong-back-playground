@@ -1,0 +1,32 @@
+================================================================================
+FILE:        app/schemas/audit_log_schema.py
+LAYER:       schema
+LAST-SYNCED: 2026-06-07
+================================================================================
+
+[ PLAIN ENGLISH ]
+This describes how an audit-log entry looks when the API returns it to a
+SuperAdmin — all the fields of a recorded action in a predictable JSON shape.
+
+[ TECHNICAL ]
+Pydantic response model for GET /audit-logs, read directly from the AuditLog ORM
+object.
+
+[ METHODS / SYMBOLS ]
+- AuditLogResponse (class)
+    Plain: One audit entry as returned by the API.
+    Tech:  fields mirror AuditLog: id, timestamp, actor_user_id, actor_email,
+           actor_role, method, path, status_code, client_ip, user_agent,
+           duration_ms, request_id. Optional fields typed as `| None`.
+           Config.from_attributes = True.
+
+[ READS / WRITES / LOGS ]
+None — serialization only.
+
+[ RELATIONS ]
+Called by: controllers.audit_routes (response_model).
+Calls:     pydantic.
+
+[ NOTES / GOTCHAS ]
+Keep this in lockstep with audit_log_model: if you add/rename a column there,
+update this schema too.

@@ -1,0 +1,40 @@
+================================================================================
+FILE:        tests/test_controllers/test_audit.py
+LAYER:       test
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+These tests prove the audit log behaves: only a SuperAdmin can read it, and the
+right things get recorded (changes and failures) while plain successful reads do
+not.
+
+[ TECHNICAL ]
+Async controller tests via async_client. Helpers register/login and mint a
+SuperAdmin token (register accepts the role directly).
+
+[ METHODS / SYMBOLS ]
+- test_audit_logs_requires_token ......... GET /audit-logs no token -> 401.
+- test_audit_logs_forbidden_for_regular_user Regular user -> 403.
+- test_audit_logs_accessible_for_superadmin SuperAdmin -> 200, returns a list.
+- test_failed_login_is_logged ............ a bad login (401) appears in the log
+                                           (POST, 401, path=/login, actor null).
+- test_register_mutation_is_logged_with_actor_resolution SuperAdmin registers a
+                                           user; entry has actor_role SuperAdmin
+                                           and a resolved actor_user_id.
+- test_successful_profile_read_is_not_logged GET /myprofile 200 must NOT be in
+                                           the log (non-sensitive read).
+
+[ READS / WRITES / LOGS ]
+Drives the full app; reads audit_logs back through the API; writes users and
+audit rows as side effects. Registration/login also touch Redis register and
+login counters. Rows are not cleaned up from the shared DB.
+
+[ RELATIONS ]
+Calls (via HTTP): audit_routes, auth_routes, user_routes. Exercises middleware +
+audit_service end to end. Uses conftest.async_client.
+
+[ NOTES / GOTCHAS ]
+Asserts the POLICY (should_log) through real HTTP, not by calling it directly.
+Filters by method/status to stay robust against rows from other tests in the
+shared DB.

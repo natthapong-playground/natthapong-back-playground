@@ -1,0 +1,46 @@
+================================================================================
+FILE:        tests/test_controllers/test_countries.py
+LAYER:       test
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+Checks the country search and single-country endpoints behave: anonymous callers
+are rejected, searching by name works, the limit is respected (and validated),
+looking up a code works in any case, unknown codes give a clear 404, and every
+result carries the endpoint's agreed camelCase response fields.
+
+[ TECHNICAL ]
+Async httpx tests over GET /countries and GET /countries/{code} using the
+async_client + auth_headers fixtures. Asserts auth gating (401), the camelCase
+contract keys, case-insensitivity, limit validation (422), and the 404 body.
+
+[ METHODS / SYMBOLS ]
+- test_search_requires_token: GET /countries with no token -> 401.
+- test_get_one_requires_token: GET /countries/JP with no token -> 401.
+- test_search_returns_camelcase_records: limit=5 -> 200 list; first row has the
+  camelCase keys {code, name, timezone, utcOffsetMinutes, utcOffsetLabel,
+  localTime} and utcOffsetLabel starts with "UTC".
+- test_search_filters_by_name: search "scot" -> results include "Scotland".
+- test_search_respects_limit: limit=3 -> exactly 3 rows.
+- test_search_limit_out_of_range_is_422: limit=999 -> 422.
+- test_get_country_is_case_insensitive: /jp -> 200, code JP / Japan / Asia/Tokyo.
+- test_get_country_unknown_code_is_404: /ZZ -> 404 {"detail":"Unknown country code"}.
+
+[ READS / WRITES / LOGS ]
+Hits the app through async_client, which runs create_all. auth_headers creates
+users/audit rows and touches Redis registration/login counters; protected country
+requests also query the users table during authentication. Unauthenticated 401,
+invalid-limit 422, and unknown-code 404 responses create audit rows. Country
+lookup/time calculation itself uses only the cached JSON dataset.
+
+[ RELATIONS ]
+Exercises: controllers.countries_routes -> services.country_service ->
+           timezone_service + app/data/countries.json.
+Fixtures:  tests.conftest.async_client + auth_headers.
+
+[ NOTES / GOTCHAS ]
+The camelCase key set is the endpoint's wire contract. Search/lookup assertions
+depend on specific seed rows (Scotland, JP) and dataset size in countries.json;
+a data change can break them without any source-code change. Requires the project
+venv (tzdata) so zoneinfo resolves zones on Windows.

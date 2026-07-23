@@ -1,0 +1,69 @@
+================================================================================
+FILE:        app/core/middleware.py
+LAYER:       middleware (core)
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+This holds two request-wrapping helpers. The audit logger is the security camera:
+it records who did what, when, and whether it succeeded for changes, failures,
+and configured sensitive reads (never passwords), and stays silent if recording
+fails so the real request is never broken. The security-headers helper stamps
+standard browser-hardening headers (anti-clickjacking, anti-sniffing, content
+policy, HTTPS pinning) onto responses returned through it. If downstream
+propagates an unhandled exception, neither helper receives a response to audit or
+decorate.
+
+[ TECHNICAL ]
+Two Starlette BaseHTTPMiddleware classes. AuditLogMiddleware wraps the whole
+request/response cycle and sees the final status code when `call_next` returns a
+response, including responses from handled HTTP/dependency errors. It delegates
+the keep/skip decision to audit_service.should_log. SecurityHeadersMiddleware
+sets fixed response headers and nothing else. Neither dispatch method catches an
+exception propagated by `call_next`.
+
+[ METHODS / SYMBOLS ]
+- SecurityHeadersMiddleware.dispatch(request, call_next)
+    Plain: Add hardening headers to each response returned by the app.
+    Tech:  sets X-Content-Type-Options=nosniff, X-Frame-Options=DENY, a
+           Content-Security-Policy (default-src 'self' ...),
+           Strict-Transport-Security (max-age=63072000; includeSubDomains;
+           preload), Referrer-Policy=strict-origin-when-cross-origin, and
+           Permissions-Policy (geolocation/microphone/camera denied). Mutates
+           headers only; never inspects the body.
+- _extract_actor(request) -> (email|None, role|None)
+    Plain: Best guess at who is making the call, from their login ticket.
+    Tech:  reads Authorization: Bearer; jwt.decode for sub/role; NEVER raises
+           (returns None,None on missing/invalid token). Attribution only — does
+           not re-check revocation.
+- _client_ip(request) -> str|None
+    Plain: The caller's IP, even when we're behind a proxy.
+    Tech:  prefers first X-Forwarded-For entry, else request.client.host.
+- AuditLogMiddleware.dispatch(request, call_next)
+    Plain: Time the request, then log it if it matters.
+    Tech:  measures duration; if should_log(method,path,status): opens its OWN
+           AsyncSessionLocal, resolves actor_user_id via user_service when an
+           email is present, calls audit_service.create_log; all wrapped in
+           try/except (logging failures swallowed). The `call_next` call itself
+           is outside that try/except, so propagated exceptions are not logged.
+
+[ READS / WRITES / LOGS ]
+Reads: request headers (Authorization, X-Forwarded-For, User-Agent,
+       X-Request-ID), settings, users table (id lookup). Writes: one audit_logs
+       row per logged request.
+
+[ RELATIONS ]
+Called by: main (app.add_middleware — both classes).
+Calls:     services.audit_service (should_log, create_log),
+           services.user_service (get_user_by_email), models.base
+           (AsyncSessionLocal), core.config. (SecurityHeadersMiddleware calls
+           nothing — pure header mutation.)
+
+[ NOTES / GOTCHAS ]
+AuditLogMiddleware uses its OWN DB session — never the request's, which may be
+rolled back on an error. Logs metadata only (no request bodies) so passwords stay
+out of the log. On a successful login the request carries no token yet, so its
+actor is null. SecurityHeadersMiddleware is added AFTER the audit middleware but
+BEFORE CORS, so CORS remains the outermost configured layer. Guarantees in this
+doc apply to returned handled responses, not exceptions propagated past
+`call_next`.

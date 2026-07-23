@@ -1,0 +1,38 @@
+================================================================================
+FILE:        app/models/user_model.py
+LAYER:       model
+LAST-SYNCED: 2026-06-07
+================================================================================
+
+[ PLAIN ENGLISH ]
+This defines the "users" table — the actual shape of a user record in the
+database: their email, scrambled password, role, whether the account is active,
+and when it was created/updated.
+
+[ TECHNICAL ]
+SQLAlchemy model mapping to table "users".
+
+[ METHODS / SYMBOLS ]
+- User (class, __tablename__ = "users")
+    Plain: One row = one user account.
+    Tech:  columns:
+           id (int, PK, indexed)
+           email (str, unique, indexed, not null)
+           hashed_password (str, not null)
+           role (str, default "Regular", not null)
+           is_active (bool, default True)
+           created_at / updated_at (tz-aware datetime, default now(utc), not null)
+
+[ READS / WRITES / LOGS ]
+None directly — it is the data definition. Rows are read/written by
+user_service and the auth flow.
+
+[ RELATIONS ]
+Called by: services.user_service, api.dependencies, middleware (id lookup),
+           schemas.user_schema (serialization), tests.
+Calls:     models.base.Base.
+
+[ NOTES / GOTCHAS ]
+`role` is a free string at the DB level; the allowed set (Guest/Regular/Admin/
+SuperAdmin) is enforced by the Pydantic schema, not a DB constraint. updated_at
+has no onupdate hook, so it is not auto-bumped on edits yet.

@@ -1,0 +1,42 @@
+================================================================================
+FILE:        app/models/audit_log_model.py
+LAYER:       model
+LAST-SYNCED: 2026-06-07
+================================================================================
+
+[ PLAIN ENGLISH ]
+This defines the "audit_logs" table — one row for every recorded API action:
+who did it, what they called, the result, their IP, and when. The "who" fields
+are copied in (not linked), so the record stays readable even if that user is
+later deleted.
+
+[ TECHNICAL ]
+SQLAlchemy model mapping to table "audit_logs". Actor fields are denormalized
+and nullable (null = anonymous / failed-auth). Indexed for common queries.
+
+[ METHODS / SYMBOLS ]
+- AuditLog (class, __tablename__ = "audit_logs")
+    Plain: One row = one recorded request.
+    Tech:  columns:
+           id (int, PK, indexed)
+           timestamp (tz datetime, default now(utc), not null, indexed)
+           actor_user_id (int, nullable, indexed)
+           actor_email / actor_role (str, nullable)
+           method / path (str, not null)
+           status_code (int, not null, indexed)
+           client_ip / user_agent (str, nullable)
+           duration_ms (int, nullable)
+           request_id (str, nullable, indexed)
+
+[ READS / WRITES / LOGS ]
+None directly — it is the data definition. Rows are written by the audit
+middleware (via audit_service) and read by audit_routes.
+
+[ RELATIONS ]
+Called by: services.audit_service, schemas.audit_log_schema, main (table reg).
+Calls:     models.base.Base.
+
+[ NOTES / GOTCHAS ]
+No foreign key to users on purpose: the actor is a snapshot, so the log survives
+user deletion or role changes. Table grows unbounded — a retention/cleanup
+policy is a future concern.

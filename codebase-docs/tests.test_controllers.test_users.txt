@@ -1,0 +1,46 @@
+================================================================================
+FILE:        tests/test_controllers/test_users.py
+LAYER:       test
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+These tests check the rules around creating users (valid email, password length,
+allowed roles, no duplicates) and a couple of token edge cases on the profile
+endpoint.
+
+[ TECHNICAL ]
+Async controller tests via async_client. UUID emails for independence.
+
+[ METHODS / SYMBOLS ]
+- test_register_duplicate_email ... second register of same email -> 400.
+- test_register_password_too_short  password < 8 -> 422.
+- test_register_invalid_email ..... bad email -> 422.
+- test_register_invalid_role ...... role outside RoleType -> 422.
+- test_register_missing_password .. no password -> 422.
+- test_register_defaults_role_to_regular role omitted -> 201, role == "Regular".
+- test_register_is_rate_limited_per_ip REGISTER_RATE_LIMIT_MAX_ATTEMPTS signups
+                                    from one IP all 201, the next -> 429 +
+                                    Retry-After (per-test IP isolates the counter).
+- test_profile_malformed_token .... bad bearer -> 401 "Could not validate
+                                    credentials".
+- test_profile_inactive_user ...... valid token then deactivate user -> 401.
+
+[ READS / WRITES / LOGS ]
+Writes users; directly flips is_active for the inactive case; every validated,
+handler-entering registration touches the Redis register counter (including the
+duplicate request), while schema-invalid 422 requests do not. The login used by
+the inactive-profile test clears its login-failure key. Mutations and handled
+errors produce audit_logs rows. Created users remain in the shared DB.
+
+[ RELATIONS ]
+Calls (via HTTP): user_routes (register, myprofile), auth_routes (login),
+services.rate_limit_service (register throttle). Uses conftest.async_client and
+models.base/user_model.
+
+[ NOTES / GOTCHAS ]
+Covers the malformed-token and inactive-user 401 branches that test_auth.py does
+not. (The "valid token, user deleted" branch is covered in test_auth.py.) The
+register rate-limit test relies on conftest's per-test X-Forwarded-For to keep its
+counter isolated from the rest of the suite. The duplicate-email test consumes
+two registration-counter attempts because counting precedes duplicate lookup.

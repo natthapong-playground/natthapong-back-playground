@@ -1,0 +1,151 @@
+################################################################################
+#                                                                              #
+#   codebase-docs/  —  HEAD / INDEX  (read this first)                         #
+#                                                                              #
+################################################################################
+LAST-SYNCED: 2026-07-23
+
+PURPOSE
+-------
+This folder is a plain-text, human-and-machine-readable mirror of the codebase.
+For every source file there is one .txt doc here describing what the file is,
+what its methods do, what it reads/writes/logs, and how it connects to the rest
+of the system. Each doc is written for TWO audiences at once:
+
+    [ PLAIN ENGLISH ]  — a non-engineer can understand what this is and why.
+    [ TECHNICAL ]      — an engineer gets the precise behavior and contracts.
+
+These docs are documentation, not source of truth for layout — that remains
+`structures.txt` at the repo root. Think of it this way:
+    structures.txt  = the MAP   (where files live, naming rules)
+    codebase-docs/  = the GUIDE (what each file actually does, in depth)
+
+Two non-file "meta" docs head this folder:
+    _INDEX.txt      = this file: the maintenance protocol, template, and file map.
+    _KNOWLEDGE.txt  = the PRIMER: the cross-cutting concepts, tech stack, auth &
+                      security model, and patterns that span many files. Read it
+                      to understand the system as a whole; keep its sections in
+                      sync when a concept (not just one file) changes.
+
+
+--------------------------------------------------------------------------------
+MAINTENANCE PROTOCOL  (instructions for Claude / any AI assistant)
+--------------------------------------------------------------------------------
+Treat this folder as a living artifact. Whenever you create, modify, move,
+rename, or delete a source file under `app/` or `tests/`, you MUST keep its
+matching doc here in sync IN THE SAME CHANGE:
+
+  1. CREATE a source file  -> create its .txt doc here (see NAMING below).
+  2. CHANGE a method/route/model/log -> update the affected section(s):
+        [ METHODS / SYMBOLS ], [ READS / WRITES / LOGS ], [ RELATIONS ].
+  3. DELETE/RENAME a source file -> delete/rename its doc to match.
+  4. Always refresh the LAST-SYNCED date at the top of any doc you touch.
+  5. If you add a brand-new layer/folder, also update this _INDEX.txt file map
+     and `structures.txt`.
+
+Keep both audiences accurate: if you change technical behavior, also fix the
+PLAIN ENGLISH summary so the two never disagree. Do not let a doc describe
+behavior the code no longer has — a wrong doc is worse than a missing one.
+
+
+--------------------------------------------------------------------------------
+NAMING
+--------------------------------------------------------------------------------
+One doc per source file. The doc name is the source file's module path with
+dots, plus `.txt`. Examples:
+
+    app/core/middleware.py            ->  app.core.middleware.txt
+    app/api/controllers/auth_routes.py->  app.api.controllers.auth_routes.txt
+    tests/conftest.py                 ->  tests.conftest.txt
+
+
+--------------------------------------------------------------------------------
+DOC TEMPLATE  (copy this for every new file)
+--------------------------------------------------------------------------------
+================================================================================
+FILE:        <relative/path/to/file.py>
+LAYER:       <controller | service | model | schema | core | middleware | test>
+LAST-SYNCED: <YYYY-MM-DD>
+================================================================================
+
+[ PLAIN ENGLISH ]
+<2-5 sentences anyone can follow: what this file is for and why it exists.>
+
+[ TECHNICAL ]
+<What it does technically, key dependencies, how it fits the layering.>
+
+[ METHODS / SYMBOLS ]
+- name(args) -> return
+    Plain: <one line, non-technical>
+    Tech:  <signature behavior, what it raises, side effects>
+
+[ READS / WRITES / LOGS ]
+<What it reads (DB/Redis/headers/env) and what it writes (DB rows, Redis keys,
+audit entries, stdout). "None" if pure logic.>
+
+[ RELATIONS ]
+Called by: <upstream files>
+Calls:     <downstream files>
+
+[ NOTES / GOTCHAS ]
+<Edge cases, deliberate decisions, TODOs. "None" if nothing notable.>
+
+
+--------------------------------------------------------------------------------
+FILE MAP  (kept in sync with app/ and tests/)
+--------------------------------------------------------------------------------
+META (folder head — not file mirrors)
+    _INDEX.txt ................... this file: protocol, template, file map
+    _KNOWLEDGE.txt ............... cross-cutting concepts, tech stack, security model
+
+ENTRYPOINT
+    app.main.txt ................. FastAPI app: lifespan, CORS, security-headers + audit middleware, routing
+
+CORE (config + cross-cutting)
+    app.core.config.txt .......... .env parsing (pydantic-settings)
+    app.core.redis_client.txt .... Redis singleton for denylist/login/register keys
+    app.core.security.txt ........ bcrypt hashing + JWT creation (access + refresh)
+    app.core.middleware.txt ...... AuditLogMiddleware + SecurityHeadersMiddleware
+
+API (controllers + DI)
+    app.api.dependencies.txt ..... get_db / get_redis / get_current_user / require_roles
+    app.api.controllers.auth_routes.txt ... /login (rate-limited), /logout, /refresh-token
+    app.api.controllers.user_routes.txt ... /users/register, /users/myprofile
+    app.api.controllers.audit_routes.txt .. /audit-logs (SuperAdmin only)
+    app.api.controllers.countries_routes.txt /countries, /countries/{code} (auth-required)
+    app.api.controllers.clock_routes.txt .. /clock batch snapshot (auth-required)
+
+MODELS (SQL tables)
+    app.models.base.txt .......... engine, AsyncSessionLocal, Base
+    app.models.user_model.txt .... users table
+    app.models.audit_log_model.txt audit_logs table
+
+SCHEMAS (Pydantic)
+    app.schemas.token_schema.txt . access/refresh token response + refresh request
+    app.schemas.user_schema.txt .. user request/response + RoleType
+    app.schemas.audit_log_schema.txt AuditLogResponse
+    app.schemas.country_schema.txt . Country + ClockSnapshot (camelCase wire)
+
+SERVICES (business logic)
+    app.services.auth_service.txt  Redis token denylist (revoke / check)
+    app.services.rate_limit_service.txt Redis login/register rate-limit counters
+    app.services.user_service.txt  user lookup/creation + authentication
+    app.services.audit_service.txt logging policy + create/query audit entries
+    app.services.timezone_service.txt builds current country time snapshots
+    app.services.country_service.txt dataset load + search/lookup + clock snapshot
+
+DATA (static datasets)
+    app.data.countries.txt ....... countries.json (252 code/name/timezone records)
+
+TESTS
+    tests.conftest.txt ........... httpx ASGI client + auth_headers fixtures
+    tests.test_controllers.test_auth.txt .. register/profile/logout flows
+    tests.test_controllers.test_login.txt . login success + error branches
+    tests.test_controllers.test_users.txt . register validation + profile token edges
+    tests.test_controllers.test_audit.txt . audit access control + logging policy
+    tests.test_controllers.test_countries.txt countries search + lookup + 404
+    tests.test_controllers.test_clock.txt . clock auth, order, unknown/missing-code behavior
+    tests.test_controllers.test_refresh.txt refresh-token rotation + type separation
+    tests.test_controllers.test_rate_limit.txt login lockout + reset-on-success
+    tests.test_controllers.test_security_headers.txt headers on success + handled 401
+    tests.test_controllers.test_health.txt /health readiness probe (DB + Redis)

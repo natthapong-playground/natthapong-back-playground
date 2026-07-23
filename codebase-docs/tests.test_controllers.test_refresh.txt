@@ -1,0 +1,51 @@
+================================================================================
+FILE:        tests/test_controllers/test_refresh.py
+LAYER:       test
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+Checks the session-renewal flow: that logging in returns both tickets, that a
+refresh ticket can be swapped for a working new one, that the old refresh ticket
+dies after use, and that the two ticket kinds can't be used in each other's place.
+
+[ TECHNICAL ]
+Async httpx tests against the real ASGI app (shared Postgres/Redis). Each test
+registers a uuid-unique Regular user and logs in. Requires DB + Redis to run.
+
+[ METHODS / SYMBOLS ]
+- test_login_returns_refresh_token: /login body has access_token + refresh_token
+  (distinct) and token_type "bearer".
+- test_refresh_returns_usable_access_token: POST /refresh-token -> 200 with a new
+  pair; the new access token authenticates GET /users/myprofile.
+- test_refresh_rotates_and_revokes_old_token: first refresh 200; replaying the
+  same refresh token -> 401 (rotation revoked it).
+- test_refresh_rejects_access_token: posting an access token to /refresh-token ->
+  401 (type != refresh).
+- test_refresh_rejects_garbage_token: junk string -> 401.
+- test_refresh_missing_body_is_422: POST /refresh-token with no body -> 422.
+- test_refresh_rejected_for_inactive_user: deactivate the user after issuance,
+  then refresh -> 401 (the user.is_active branch in /refresh-token).
+- test_access_route_rejects_refresh_token: refresh token as Bearer on
+  /users/myprofile -> 401 (type != access).
+- test_logout_revokes_refresh_token: logout with the refresh token in the body ->
+  200, then that refresh token at /refresh-token -> 401 (whole session ended).
+- test_logout_with_expired_access_still_revokes_refresh: logout using a deliberately
+  expired access token + refresh in body -> 200, and the refresh token is then
+  rejected at /refresh-token (edge case: expired access must not strand a session).
+
+[ READS / WRITES / LOGS ]
+Reads/Writes: users table, audit_logs rows, Redis registration/login counters,
+and Redis denylist via the real endpoints. The inactive-user test directly
+updates users.is_active through AsyncSessionLocal. Created users and audit rows
+remain in the shared DB.
+
+[ RELATIONS ]
+Exercises: controllers.auth_routes (/login, /refresh-token), api.dependencies
+           (get_current_user type check), core.security, services.auth_service.
+Uses:      conftest.async_client, core.security (create_access_token for the
+           expired-token case), models.base/user_model (direct deactivate).
+
+[ NOTES / GOTCHAS ]
+uuid-unique emails keep tests independent in the shared DB/Redis. Needs live
+Postgres + Redis; skipped/failing if the infrastructure is down.

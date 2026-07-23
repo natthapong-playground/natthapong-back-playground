@@ -1,0 +1,43 @@
+================================================================================
+FILE:        app/core/config.py
+LAYER:       core
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+This file reads the project's settings from the `.env` file (things like the
+database address, the secret key, and how long a login lasts). If a required
+setting is missing, the app refuses to start — which is good, because it fails
+loudly instead of misbehaving later.
+
+[ TECHNICAL ]
+A pydantic-settings BaseSettings subclass. All fields are required (no defaults),
+so a missing env var raises at import time. Loaded once into the module-level
+singleton `settings`, imported everywhere else.
+
+[ METHODS / SYMBOLS ]
+- Settings (class)
+    Plain: The typed list of every setting the app needs.
+    Tech:  Fields: PROJECT_NAME, API_V1_STR, SECRET_KEY, DATABASE_URL, REDIS_URL,
+           ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES (int),
+           REFRESH_TOKEN_EXPIRE_MINUTES (int), LOGIN_RATE_LIMIT_MAX_ATTEMPTS
+           (int), LOGIN_RATE_LIMIT_WINDOW_SECONDS (int),
+           REGISTER_RATE_LIMIT_MAX_ATTEMPTS (int),
+           REGISTER_RATE_LIMIT_WINDOW_SECONDS (int), ORIGINS_API (list[str]).
+           model_config: env_file=".env", utf-8, extra="ignore".
+- settings (instance)
+    Plain: The ready-to-use settings object.
+    Tech:  Settings() — instantiated at import; the app-wide config singleton.
+
+[ READS / WRITES / LOGS ]
+Reads: .env file + process environment. Writes/Logs: none.
+
+[ RELATIONS ]
+Called by: nearly every module (security, redis_client, base, dependencies,
+           middleware, services, controllers, main).
+Calls:     pydantic-settings only.
+
+[ NOTES / GOTCHAS ]
+The JWT secret is named SECRET_KEY here (NOT JWT_SECRET, despite older docs).
+All fields have no defaults, so tests and Docker must supply a complete .env.
+Unknown environment fields are ignored because model_config uses extra="ignore".

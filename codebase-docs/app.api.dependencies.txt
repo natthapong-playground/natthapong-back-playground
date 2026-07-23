@@ -1,0 +1,51 @@
+================================================================================
+FILE:        app/api/dependencies.py
+LAYER:       api (dependency injection)
+LAST-SYNCED: 2026-07-23
+================================================================================
+
+[ PLAIN ENGLISH ]
+This is the shared plumbing that routes ask for: a database connection, a Redis
+connection, "who is the logged-in user," and "is this user allowed (right role)."
+Routes declare what they need and FastAPI supplies it.
+
+[ TECHNICAL ]
+FastAPI dependency providers. get_db yields a scoped AsyncSession; get_redis
+returns the shared client; get_current_user validates the bearer token end to
+end; require_roles is a dependency FACTORY that layers a role check on top.
+
+[ METHODS / SYMBOLS ]
+- oauth2_scheme
+    Plain: Tells FastAPI tokens arrive as "Authorization: Bearer ...".
+    Tech:  OAuth2PasswordBearer(tokenUrl=API_V1_STR + "/login").
+- get_db() -> AsyncSession  (async generator)
+    Plain: Lend a database session for one request, then close it.
+    Tech:  async-with AsyncSessionLocal; yields the session.
+- get_redis() -> redis.Redis  (async)
+    Plain: Hand over the shared Redis connection.
+    Tech:  returns get_redis_client().
+- get_current_user(token, db, r) -> User  (async)
+    Plain: Verify the access ticket and return the matching, active user.
+    Tech:  jwt.decode (sub=email, jti, type); 401 if decode fails, sub missing,
+           or type != "access" (so refresh tokens are rejected here); 401 if the
+           present jti is revoked in Redis; 401 if user missing or inactive.
+- require_roles(*allowed_roles) -> dependency
+    Plain: Allow only users whose role is in the given list (else 403).
+    Tech:  factory returning an async dep that depends on get_current_user and
+           raises 403 if current_user.role not in allowed_roles.
+
+[ READS / WRITES / LOGS ]
+Reads: Authorization header, settings, users table, Redis denylist. Writes/Logs:
+none (raising 401/403 here is captured by the audit middleware).
+
+[ RELATIONS ]
+Called by: controllers (auth_routes, user_routes, audit_routes).
+Calls:     core.config, core.redis_client, services.user_service,
+           services.auth_service, models.base, models.user_model.
+
+[ NOTES / GOTCHAS ]
+get_current_user is the single source of the 401 cases; require_roles only adds
+the 403. A missing token yields FastAPI's default 401 "Not authenticated".
+`jti` is not required: a validly signed access token with a `sub` but no `jti`
+skips the Redis denylist check. Tokens minted by core.security include a `jti`,
+but custom signed tokens can expose this gap.

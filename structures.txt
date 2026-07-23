@@ -1,0 +1,98 @@
+backend-api-repo/
+├── app/                        # Core Python Application
+│   ├── api/
+│   │   ├── controllers/        # CONTROLLER LAYER: Router endpoints
+│   │   │   ├── auth_routes.py  # /login (rate-limited), /logout, /refresh-token (Redis token denylist + rotation)
+│   │   │   ├── user_routes.py  # /users/register + /users/myprofile
+│   │   │   ├── audit_routes.py # /audit-logs (SuperAdmin-only read of API activity)
+│   │   │   ├── countries_routes.py # /countries, /countries/{code} (World Timezone; auth-required)
+│   │   │   └── clock_routes.py # /clock batch snapshot (World Timezone; auth-required)
+│   │   └── dependencies.py     # JWT extraction, OAuth2 schemes, DB session, require_roles guard
+│   │
+│   ├── core/                   # Global System Configuration
+│   │   ├── config.py           # Strictly parses .env configurations
+│   │   ├── redis_client.py     # Shared async Redis client (denylist + login/register counters)
+│   │   ├── middleware.py       # AuditLogMiddleware (records API activity) + SecurityHeadersMiddleware (CSP/HSTS/nosniff/X-Frame)
+│   │   └── security.py         # bcrypt password hashing & expiring JWT generation (access + refresh, with jti + type)
+│   │
+│   ├── models/                 # MODEL LAYER: Database Entities
+│   │   ├── base.py             # SQLAlchemy Declarative Base
+│   │   ├── user_model.py       # Defines physical database schema
+│   │   └── audit_log_model.py  # AuditLog entity (actor/method/path/status/ip, denormalized actor)
+│   │
+│   ├── schemas/                # VIEW LAYER: JSON Serialization & Pydantic Validation
+│   │   ├── token_schema.py     # Token responses (access + refresh) and refresh request body
+│   │   ├── user_schema.py      # Structuring User incoming payloads vs outgoing responses
+│   │   ├── audit_log_schema.py # AuditLogResponse serialization
+│   │   └── country_schema.py   # Country + ClockSnapshot (snake_case attrs, camelCase wire via alias)
+│   │
+│   ├── services/               # BUSINESS LOGIC LAYER: The absolute brains of the system
+│   │   ├── auth_service.py     # Redis token denylist: revoke and check JWT IDs
+│   │   ├── rate_limit_service.py # Redis-backed counters: login brute-force + register-per-IP throttle
+│   │   ├── user_service.py     # Evaluates domain logic before committing to database
+│   │   ├── audit_service.py    # Logging policy (should_log) + create/query of audit entries
+│   │   ├── timezone_service.py # Builds current country snapshots with zoneinfo offset/local time
+│   │   └── country_service.py  # Loads countries.json; search/lookup; builds clock snapshot
+│   │
+│   ├── data/                   # STATIC DATASETS (no DB): seed/reference data
+│   │   └── countries.json      # 252 [{code,name,timezone}] records; offsets NEVER stored
+│   │
+│   ├── websockets/             # (planned) REAL-TIME LAYER: Persistent Connections — not yet implemented
+│   │   └── chat_manager.py     #   Tracks active WS connections and broadcasts messages
+│   │
+│   └── main.py                 # FastAPI init (lifespan: create_all + Redis ping; CORS; security-headers + audit middleware; routing; / + /health)
+│
+├── nginx/                      # (planned) BACKEND TRAFFIC INFRASTRUCTURE — not yet implemented
+│   └── nginx.conf              #   Load balances traffic among FastAPI instances using Round-Robin
+│
+├── tests/                      # AUTOMATED TESTING SUITE
+│   ├── conftest.py             # httpx ASGI client fixture; runs create_all against the configured DB
+│   │                           #   (note: shared real Postgres/Redis, no per-test teardown yet)
+│   ├── test_controllers/       # Asserts status codes, payloads, and OAuth access blocks
+│   │   ├── test_auth.py
+│   │   ├── test_login.py
+│   │   ├── test_users.py
+│   │   ├── test_audit.py       # Audit-log access control + logging-policy assertions
+│   │   ├── test_countries.py   # /countries search + lookup + 404 + camelCase contract
+│   │   ├── test_clock.py       # Four /clock tests: auth, order/reference, unknown skip, missing code
+│   │   ├── test_refresh.py     # /refresh-token rotation + access/refresh type separation
+│   │   ├── test_rate_limit.py  # /login brute-force lockout + reset-on-success
+│   │   ├── test_security_headers.py # hardening headers on success + handled 401 response
+│   │   └── test_health.py      # /health readiness probe (DB + Redis)
+│   └── test_websockets/        # (planned) Asserts connection handshakes and socket frame transfers
+│       └── test_chat.py
+│
+├── .env                        # Actual local config (SECRET_KEY, DATABASE_URL, REDIS_URL, ...)
+├── .env.example                # Committed template of required keys (placeholders, no secrets)
+├── requirements.txt            # Python dependencies
+├── pytest.ini                  # Pytest / asyncio configuration
+├── Dockerfile                  # Production-optimized Python slim image
+└── docker-compose.yml          # Currently spawns: PostgreSQL + Redis only
+                                #   (planned: 3x FastAPI replicas behind an Nginx round-robin proxy)
+
+
+frontend-client-repo/            # (planned/separate) Angular client context; not present in this repo
+├── src/                        # Angular Workspace
+│   ├── app/
+│   │   ├── core/               # App-wide singleton utilities
+│   │   │   ├── guards/         # AuthGuard (Prevents unauthenticated routing)
+│   │   │   ├── interceptors/   # JWT Interceptor (Appends 'Authorization: Bearer' headers)
+│   │   │   └── services/       # AuthService (Tracks tokens in localStorage/HttpOnly cookies)
+│   │   │
+│   │   ├── features/           # Component Views mapping to application sections
+│   │   │   ├── auth/           # Login / Register interface components
+│   │   │   └── dashboard/      # Main interface connecting to WebSocket updates
+│   │   │
+│   │   ├── app-routing.module.ts
+│   │   └── app.component.ts
+│   │
+│   ├── assets/                 # SVGs, images, static application assets
+│   └── environments/           # Target API URI settings
+│       ├── environment.ts      # Targets local Nginx gateway (http://localhost:8000/api)
+│       └── environment.prod.ts # Targets production API gateway (https://api.domain.com)
+│
+├── nginx/                      # FRONTEND STATIC WEB SERVER
+│   └── default.conf            # Instructs Nginx how to route deep links back to index.html (SPA routing)
+│
+├── Dockerfile                  # Multi-stage: 1. Node builds code -> 2. Nginx copies static dist files
+└── docker-compose.yml          # Spawns: Standalone frontend server mapping to port 4200/80
