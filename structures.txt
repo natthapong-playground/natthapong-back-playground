@@ -62,12 +62,16 @@ backend-api-repo/
 │   └── test_websockets/        # (planned) Asserts connection handshakes and socket frame transfers
 │       └── test_chat.py
 │
-├── .env                        # Actual local config (SECRET_KEY, DATABASE_URL, REDIS_URL, ...)
+├── .env                        # Actual local config (ignored; never publish)
 ├── .env.example                # Committed template of required keys (placeholders, no secrets)
+├── .dockerignore               # Whitelists only app/ + requirements for Docker builds
 ├── requirements.txt            # Python dependencies
 ├── pytest.ini                  # Pytest / asyncio configuration
-├── Dockerfile                  # Production-optimized Python slim image
-└── docker-compose.yml          # Currently spawns: PostgreSQL + Redis only
+├── setup.bat                   # Windows: create project .venv, install, and generate local .env
+├── start.bat                   # Windows: validate, start healthy infrastructure, run the API
+├── stop.bat                    # Windows: stop project infrastructure without deleting containers
+├── Dockerfile                  # Python 3.12 application image (config supplied at runtime)
+└── docker-compose.yml          # PostgreSQL + Redis on localhost, with health checks
                                 #   (planned: 3x FastAPI replicas behind an Nginx round-robin proxy)
 
 

@@ -1,49 +1,16 @@
-# natthapong-back-playground details
+# Natthapong Backend Playground Details
 
-<!-- venv - bash terminal -->
-python -m venv venv
+The complete, current installation, startup, testing, architecture, API, and
+security instructions are maintained in [README.md](README.md).
 
-# step 1
-source venv/Scripts/activate
+On Windows, use the repository scripts from Command Prompt or PowerShell:
 
-<!-- Keep -->
-# step 3
-uvicorn app.main:app --reload
+```bat
+setup.bat
+start.bat
+```
 
-<!-- docker -->
-touch docker-compose.yml  <!-- create docker-compose -->
-
-docker compose down
-
-# step 2
-docker compose up -d
-
-<!-- Packages -->
-pip install "fastapi[standard]" sqlalchemy asyncpg pydantic-settings passlib[bcrypt] pyjwt redis pytest pytest-asyncio httpx
-
-pip freeze > requirements.txt
-
-<!-- 
-
->>> To handle database, Model in MVC
-sqlalchemy - ORM (Object-Relational Mapper), to use python instead of raw SQL
-asyncpg - connect with PostgreSQL
-
->>> To read .env variables
-pydantic-settings - core/config file
-
->>> core/security
-passlib[bcrypt] - hashes
-pyjwt - creates the expiring OAuth2 session tokens
-
->>> Session chaching, and load balancer state management
-redis
-
->>> Testing, to simulate network request
-pytest
-pytest-asyncio
-httpx
-
- -->
-
-
+These scripts use `.venv\Scripts\python.exe` directly. They do not activate a
+shell environment or install project packages into the global Python
+installation. Run `stop.bat` when you want to stop the project containers while
+keeping their current container data.

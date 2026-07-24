@@ -67,8 +67,8 @@ connectivity. The project does not currently include a database migration tool.
 
 ## Prerequisites
 
-- Python 3.12
-- Docker Desktop, or Docker Engine with the Compose v2 plugin
+- 64-bit Python 3.12 (`py -3.12` must work on Windows)
+- Docker Desktop, or Docker Engine with the Compose v2 plugin (`docker compose`)
 - Available local ports `5432`, `6379`, and `8000`
 
 You can use independently installed PostgreSQL and Redis instead of Docker, but
@@ -76,71 +76,93 @@ the setup below uses the included Compose file.
 
 ## Quick Start
 
-### 1. Configure the environment
+### Windows (recommended)
 
-Create a local `.env` from the committed template.
+Clone the repository and open its folder in Command Prompt or PowerShell:
 
-Windows PowerShell:
-
-```powershell
-Copy-Item .env.example .env
+```bat
+git clone https://github.com/natthapong-playground/natthapong-back-playground.git
+cd natthapong-back-playground
+setup.bat
 ```
 
-Linux or macOS:
+`setup.bat` performs the complete local setup without activating Python or
+installing packages globally. It:
+
+- Requires Python 3.12 and Docker Compose v2.
+- Creates only the repository-local `.venv` directory.
+- Calls `.venv\Scripts\python.exe -m pip` for every package installation.
+- Installs and validates `requirements.txt` inside `.venv`.
+- Creates `.env` only when it is missing and replaces public placeholders with
+  random local values.
+- Never overwrites an existing `.env` or incompatible `.venv`.
+
+Start Docker Desktop, then run:
+
+```bat
+start.bat
+```
+
+`start.bat` verifies `.venv` and `.env`, starts this project's PostgreSQL and
+Redis containers, waits for both health checks, and runs Uvicorn from `.venv` at
+<http://127.0.0.1:8000>. Press `Ctrl+C` to stop the API. Stop the project
+containers without deleting them by running:
+
+```bat
+stop.bat
+```
+
+The scripts resolve paths from their own location, so they do not create or
+modify files outside this repository. Docker still manages the project's
+containers through its normal Docker Desktop storage.
+
+### Manual setup (Linux and macOS)
+
+#### 1. Configure the environment
+
+Create a local `.env` from the committed template.
 
 ```bash
 cp .env.example .env
 ```
 
-Replace `SECRET_KEY` with a strong random value. You can generate one with:
+Replace both `POSTGRES_PASSWORD` occurrences with the same private password and
+replace `SECRET_KEY` with a strong random value. Generate safe values with:
 
 ```bash
-python -c "import secrets; print(secrets.token_urlsafe(48))"
+python3.12 -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
 Do not commit or publish `.env`.
 
-### 2. Create a virtual environment
-
-Windows PowerShell:
-
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
-
-Linux or macOS:
+#### 2. Create a virtual environment
 
 ```bash
 python3.12 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip check
 ```
 
-### 3. Start PostgreSQL and Redis
+These commands call the local environment's interpreter directly and do not
+install into global Python.
+
+#### 3. Start PostgreSQL and Redis
 
 ```bash
-docker compose up -d postgres redis
+docker compose up -d --wait --wait-timeout 90 postgres redis
 docker compose ps
 ```
 
 The Compose file starts PostgreSQL and Redis only. FastAPI runs locally in the
-next step. The Compose services do not define persistent volumes, so deleting
-the PostgreSQL container also deletes its database contents.
+next step. Both ports bind to `127.0.0.1`, not every network interface. The
+services do not define persistent volumes, so `docker compose down` deletes the
+PostgreSQL container and its database contents.
 
-### 4. Run the API
-
-Windows PowerShell:
-
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
-```
-
-Linux or macOS:
+#### 4. Run the API
 
 ```bash
-.venv/bin/python -m uvicorn app.main:app --reload
+.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 Run these commands from the repository root so the application can find `.env`
@@ -172,6 +194,9 @@ working local values and comments.
 
 `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` configure the Compose
 container. Ensure that the same credentials are present in `DATABASE_URL`.
+
+The committed `.env.example` intentionally contains public placeholders. The
+real `.env` is ignored by Git and excluded from Docker builds.
 
 ## API Access
 
@@ -227,8 +252,8 @@ Linux or macOS:
 
 Run one test module with:
 
-```bash
-python -m pytest tests/test_controllers/test_refresh.py
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_controllers/test_refresh.py
 ```
 
 Important test behavior:
@@ -239,6 +264,27 @@ Important test behavior:
 - Redis rate-limit and denylist keys can remain until their TTL expires.
 - HTTPX does not run the FastAPI lifespan in the current test fixture.
 - Never point this test suite at production or valuable development services.
+
+## GitHub Publication Safety
+
+- `.env`, alternate environment files, virtual environments, caches, local
+  databases, IDE settings, and `.claude/settings.local.json` are ignored.
+- `.dockerignore` uses an allowlist: Docker receives only Python/JSON files from
+  `app/`, plus `requirements.txt` and `Dockerfile`.
+- The Dockerfile copies `app/` explicitly, so it cannot package the local `.env`,
+  `.git`, `.venv`, tests, or machine-local settings.
+- `.env.example` contains placeholders only and is safe to publish.
+
+Before every push, inspect exactly what Git will publish:
+
+```bash
+git status --short
+git diff --check
+git ls-files .env .venv venv venv2 .claude/settings.local.json
+```
+
+The final command should print nothing. Never use `git add -f` for any of those
+paths.
 
 ## Security Notes
 
@@ -269,8 +315,9 @@ This is a learning project and is not production-ready without additional work:
 - Audit persistence is best-effort and suppresses logging failures.
 - Each country has one representative IANA timezone; multi-zone countries are
   not fully modeled.
-- Docker Compose has no API service, persistent volumes, health checks, or proxy.
-- The Docker image runs as root, and the repository has no `.dockerignore`.
+- Docker Compose has no API service, persistent volumes, or proxy.
+- The Docker image still runs as root and installs development dependencies from
+  the combined requirements file.
 - Reminder scheduling, email, WebSockets, Nginx, and frontend code are planned
   concepts rather than current implementations.
 

@@ -1,0 +1,7 @@
+**
+!app/
+!app/**/
+!app/**/*.py
+!app/**/*.json
+!requirements.txt
+!Dockerfile
