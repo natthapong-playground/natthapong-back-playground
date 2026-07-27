@@ -7,19 +7,27 @@ from app.core.config import settings
 from app.core.security import create_access_token, create_refresh_token
 
 from app.api.dependencies import get_db, get_redis, oauth2_scheme
-from app.services.user_service import authenticate_user, get_user_by_email, InactiveUserError
+from app.services.user_service import (
+    authenticate_user,
+    GoogleAccountConflictError,
+    get_or_create_google_user,
+    get_user_by_email,
+    InactiveUserError,
+)
 from app.services.auth_service import revoke_token, is_token_revoked
-from app.services import rate_limit_service
-from app.schemas.token_schema import Token, RefreshRequest
+from app.services import google_auth_service, rate_limit_service
+from app.schemas.token_schema import GoogleLoginRequest, Token, RefreshRequest
 
 router = APIRouter()
 
 
 def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    direct_ip = request.client.host if request.client else "unknown"
+    if direct_ip in settings.TRUSTED_PROXY_IPS:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return direct_ip
 
 
 def _issue_tokens(email: str, role: str) -> dict:
@@ -65,6 +73,53 @@ async def login_for_access_token(
         )
 
     await rate_limit_service.clear_login_failures(r, identifier)
+    return _issue_tokens(user.email, user.role)
+
+
+@router.post("/google-login", response_model=Token)
+async def google_login(
+    payload_in: GoogleLoginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    r: redis.Redis = Depends(get_redis),
+):
+    identifier = _client_ip(request)
+    attempt_count = await rate_limit_service.record_google_login_attempt(r, identifier)
+    if attempt_count > settings.GOOGLE_LOGIN_RATE_LIMIT_MAX_ATTEMPTS:
+        retry_after = await rate_limit_service.get_google_login_retry_after(r, identifier)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many Google sign-in attempts. Please try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    try:
+        identity = await google_auth_service.verify_google_credential(payload_in.credential)
+    except google_auth_service.GoogleAuthNotConfiguredError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google sign-in is not configured.",
+        )
+    except google_auth_service.InvalidGoogleCredentialError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate Google credentials.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        user = await get_or_create_google_user(db, identity.email, identity.subject)
+    except GoogleAccountConflictError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This email is already registered with another sign-in method.",
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been deactivated. Please contact support.",
+        )
+
     return _issue_tokens(user.email, user.role)
 
 

@@ -11,14 +11,13 @@ from app.models import user_model
 async def async_client():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    transport = ASGITransport(app=app)
     # Unique source IP per test so per-IP / per-account rate-limit counters in the
     # shared Redis never bleed across tests (or across runs).
     h = uuid.uuid4().int
     fake_ip = f"{10 + h % 200}.{(h >> 8) % 256}.{(h >> 16) % 256}.{(h >> 24) % 256}"
-    headers = {"X-Forwarded-For": fake_ip}
+    transport = ASGITransport(app=app, client=(fake_ip, 123))
     async with AsyncClient(
-        transport=transport, base_url="http://testserver", headers=headers
+        transport=transport, base_url="http://testserver"
     ) as client:
         yield client
 

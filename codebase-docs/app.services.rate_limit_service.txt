@@ -1,24 +1,26 @@
 ================================================================================
 FILE:        app/services/rate_limit_service.py
 LAYER:       service
-LAST-SYNCED: 2026-07-23
+LAST-SYNCED: 2026-07-27
 ================================================================================
 
 [ PLAIN ENGLISH ]
 This is the bouncer for the auth doors. It counts attempts per key in a short
 window and, once there are too many, temporarily refuses more — slowing
-password-guessing on login and signup-spam on register. Login counters are wiped
-by a successful sign-in; both expire on their own so honest users recover.
+password-guessing, signup spam, and excessive outbound Google verification. Password
+login counters are wiped by success; every counter expires on its own.
 
 [ TECHNICAL ]
 Thin Redis fixed-window counters. A generic core (_count/_hit/_retry_after/_clear,
-keyed by prefix+identifier with auto-expiring keys) is wrapped by login and
-register helpers. Thresholds/windows come from settings. No SQL, no stdout logs.
+keyed by prefix+identifier with auto-expiring keys) is wrapped by password login,
+registration, and Google login helpers. `_hit` uses one Redis Lua operation so the
+increment and first-hit expiry are atomic. Thresholds/windows come from settings.
 
 [ METHODS / SYMBOLS ]
 - _key / _count / _hit / _retry_after / _clear (private)
     Plain: The shared counter machinery.
-    Tech:  GET / INCR(+EXPIRE on first hit) / TTL / DEL on "<prefix><identifier>".
+    Tech:  GET / atomic Lua INCR(+EXPIRE on first hit) / TTL / DEL on
+           "<prefix><identifier>".
 - is_login_blocked / record_login_failure / clear_login_failures /
   get_retry_after (login, prefix "login_fail:")
     Plain: Lock an account+IP after too many wrong passwords; clear on success.
@@ -31,13 +33,19 @@ register helpers. Thresholds/windows come from settings. No SQL, no stdout logs.
            REGISTER_RATE_LIMIT_WINDOW_SECONDS. user_routes records each
            non-blocked, schema-validated request that enters its handler,
            including duplicates; there is no clear helper.
+- record_google_login_attempt / get_google_login_retry_after
+  (prefix "google_login_attempt:")
+    Plain: Limit how often one IP can ask the server to verify Google credentials.
+    Tech:  Every request atomically increments first; auth_routes admits only counts
+           <= GOOGLE_LOGIN_RATE_LIMIT_MAX_ATTEMPTS. Fixed window uses
+           GOOGLE_LOGIN_RATE_LIMIT_WINDOW_SECONDS.
 
 [ READS / WRITES / LOGS ]
-Reads/Writes: Redis keys under "login_fail:" and "register_attempt:". Reads
-settings (max attempts + windows). No SQL, no stdout logs.
+Reads/Writes: Redis keys under "login_fail:", "register_attempt:", and
+"google_login_attempt:". Reads settings (max attempts + windows). No SQL/logs.
 
 [ RELATIONS ]
-Called by: controllers.auth_routes (login flow),
+Called by: controllers.auth_routes (password and Google login flows),
            controllers.user_routes (register flow).
 Calls:     redis client (passed in), core.config.
 
