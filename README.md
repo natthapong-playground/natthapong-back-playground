@@ -107,7 +107,7 @@ All feature routes use the default `/api/v1` prefix.
 
 | Feature | Routes | Access |
 | --- | --- | --- |
-| Authentication | `POST /login`, `/refresh-token`, `/logout` | Public or bearer token |
+| Authentication | `POST /login`, `/google-login`, `/refresh-token`, `/logout` | Public or bearer token |
 | Users | `POST /users/register`, `GET /users/myprofile` | Public or active user |
 | Countries | `GET /countries`, `/countries/{code}` | Active user |
 | Clocks | `GET /clock?code=TH,JP` | Active user |
@@ -117,12 +117,24 @@ Login uses OAuth2 form data with the email address in `username`. Protected
 routes expect `Authorization: Bearer <access-token>`. Supported roles are
 `Guest`, `Regular`, `Admin`, and `SuperAdmin`.
 
+Google login accepts a Google Identity Services ID token. Its first use creates a
+new `Regular` account bound to Google's stable account identifier; later uses
+must match that identifier. If the verified email already belongs to a local
+password account, the API refuses a silent link and the user signs in with the
+original method. Local password login and registration remain available.
+
 ## Configuration
 
-Every setting is required. [`.env.example`](.env.example) documents the local
+Core settings are required. [`.env.example`](.env.example) documents the local
 PostgreSQL and Redis connections, JWT lifetimes, rate limits, API prefix, and
-allowed CORS origins. The application fails at startup when a setting is
-missing or invalid.
+allowed CORS origins. The application fails at startup when a required setting
+is missing or invalid.
+
+To enable Google sign-in, create a Google OAuth **Web application** client, add
+the frontend URL (for example `http://localhost:4200`) as an authorized
+JavaScript origin, and set its public client ID as `GOOGLE_CLIENT_ID` in `.env`.
+Set the same value as `googleClientId` in the Angular environment. A Google
+client secret is not used by this ID-token flow.
 
 ## Testing
 
