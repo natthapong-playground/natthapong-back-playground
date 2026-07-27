@@ -1,0 +1,47 @@
+================================================================================
+FILE:        app/services/google_auth_service.py
+LAYER:       service
+LAST-SYNCED: 2026-07-27
+================================================================================
+
+[ PLAIN ENGLISH ]
+This service asks Google's trusted library whether a Google sign-in proof is real
+and intended for this application. It requires a verified email and Google's stable
+account identifier, then returns both to the account flow.
+
+[ TECHNICAL ]
+Uses google-auth's verify_oauth2_token with GOOGLE_CLIENT_ID as the audience. A
+module-shared CacheControl HTTP transport honors Google's certificate cache headers.
+An asyncio semaphore caps concurrent verification work. Synchronous verification
+runs through asyncio.to_thread so it does not block the FastAPI event loop.
+
+[ METHODS / SYMBOLS ]
+- GoogleIdentity (frozen dataclass)
+    Plain: The verified email and stable Google account identity.
+    Tech:  fields: email (lowercase str), subject (Google `sub` str).
+- verify_google_credential(credential) -> GoogleIdentity  (async)
+    Plain: Verify Google's proof and return its email and stable account identity.
+    Tech:  Raises GoogleAuthNotConfiguredError for an empty client ID; maps
+           GoogleAuthError/ValueError and absent or unverified email claims to
+           missing/invalid email or sub claims to InvalidGoogleCredentialError;
+           otherwise returns GoogleIdentity.
+- GoogleAuthNotConfiguredError (Exception)
+    Plain: Signals that the project owner has not enabled Google sign-in yet.
+    Tech:  Mapped to HTTP 503 by auth_routes.
+- InvalidGoogleCredentialError (Exception)
+    Plain: Signals that Google did not accept or verify the sign-in proof.
+    Tech:  Mapped to HTTP 401 by auth_routes.
+
+[ READS / WRITES / LOGS ]
+Reads: settings.GOOGLE_CLIENT_ID and Google's public signing certificates through
+a cache-aware google-auth transport. Writes/Logs: in-memory HTTP cache only.
+
+[ RELATIONS ]
+Called by: controllers.auth_routes.google_login.
+Calls:     core.config, google-auth, CacheControl/requests, asyncio.Semaphore,
+           asyncio.to_thread.
+
+[ NOTES / GOTCHAS ]
+The OAuth client ID is public configuration, not a client secret. This flow does
+not request Google API access or store Google tokens. Verification concurrency is
+bounded by GOOGLE_VERIFICATION_MAX_CONCURRENCY (default 8).
