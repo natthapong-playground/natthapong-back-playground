@@ -1,29 +1,45 @@
 ================================================================================
 FILE:        app/services/user_service.py
 LAYER:       service
-LAST-SYNCED: 2026-06-07
+LAST-SYNCED: 2026-07-27
 ================================================================================
 
 [ PLAIN ENGLISH ]
 This is the brains for users: find a user by email, create a new user (scrambling
-their password first), and check a login attempt. Deactivated accounts are
-rejected at login with a clear signal.
+their password first), safely bind a Google identity, and check a login attempt.
+It refuses to silently attach Google to an existing password account.
 
 [ TECHNICAL ]
 Business logic over the User model; uses core.security for hashing/verify.
 
 [ METHODS / SYMBOLS ]
 - get_user_by_email(db, email) -> User | None  (async)
-    Plain: Look up a user by email.
-    Tech:  SELECT User WHERE email == email; first() or None.
+    Plain: Look up a user by email regardless of letter case.
+    Tech:  SELECT User WHERE lower(email) == email.lower(); first() or None.
 - create_user(db, user_in) -> User  (async)
     Plain: Create an account with a scrambled password.
     Tech:  hashes password, adds User(email, hashed_password, role), commit,
            refresh, return.
+- _google_identity_marker(subject) / _require_matching_google_identity(user, subject)
+    Plain: Record and compare the stable identity Google assigned to an account.
+    Tech:  Uses `google:<sub>` in the required hashed_password column and raises
+           GoogleAccountConflictError unless an existing row has the same marker.
+- get_user_by_google_subject(db, subject) -> User | None  (async)
+    Plain: Find an existing account by Google's stable identity, even if its email changed.
+    Tech:  SELECT User WHERE hashed_password == `google:<sub>`; first() or None.
+- get_or_create_google_user(db, email, subject) -> User  (async)
+    Plain: Reuse only the same Google identity or create a new Regular account.
+    Tech:  Looks up subject first, then case-insensitive email. An existing local or
+           different Google identity raises GoogleAccountConflictError. New users
+           store the identity marker and Regular role. A concurrent IntegrityError
+           rolls back and applies the same identity check to the winning row.
 - authenticate_user(db, email, password) -> User | None  (async)
     Plain: Verify a login; None if wrong, error if deactivated.
-    Tech:  None if no user or bad password; raises InactiveUserError if
-           not is_active; else returns the user.
+    Tech:  None if no user, a google: identity marker, or bad password; raises
+           InactiveUserError if not is_active; else returns the user.
+- GoogleAccountConflictError (Exception)
+    Plain: Signal that an email already belongs to another sign-in method.
+    Tech:  raised by Google identity matching; mapped to HTTP 409 in auth_routes.
 - InactiveUserError (Exception)
     Plain: Signal that the account is deactivated.
     Tech:  raised by authenticate_user; mapped to HTTP 403 in auth_routes.
@@ -34,8 +50,13 @@ Reads/Writes: users table. No direct logs.
 [ RELATIONS ]
 Called by: controllers.auth_routes, controllers.user_routes,
            api.dependencies (get_current_user), middleware (id lookup).
-Calls:     models.user_model, schemas.user_schema, core.security.
+Calls:     models.user_model, schemas.user_schema, core.security, SQL lower(),
+           SQLAlchemy IntegrityError.
 
 [ NOTES / GOTCHAS ]
 Returning None for both "no user" and "wrong password" is intentional — callers
 surface one generic 401 so attackers can't tell which failed.
+Google-created users cannot use local password login; their required password column
+contains a `google:<sub>` identity marker. This prototype-safe binding avoids a
+schema migration and prevents email-only account takeover, but a future multi-provider
+system should move provider identities into a dedicated table.

@@ -1,12 +1,12 @@
 ================================================================================
 FILE:        tests/test_controllers/test_auth.py
 LAYER:       test
-LAST-SYNCED: 2026-07-23
+LAST-SYNCED: 2026-07-27
 ================================================================================
 
 [ PLAIN ENGLISH ]
-These tests check the core account flows end to end: registering, viewing your
-profile, and that logging out really kills your ticket.
+These tests check the core account flows end to end: registration, password and
+Google login, profile access, and that logging out really kills your ticket.
 
 [ TECHNICAL ]
 Async controller tests via the async_client fixture. Helper _register_and_login
@@ -27,7 +27,21 @@ returns a fresh token.
 - test_profile_rejects_token_without_sub validly-signed access token lacking 'sub'
                                     on GET /myprofile -> 401 (dependencies no-sub branch).
 - test_profile_rejects_deleted_user register+login, delete the user in-DB, then
-                                    GET /myprofile -> 401 (dependencies user-is-None branch).
+                                     GET /myprofile -> 401 (dependencies user-is-None branch).
+- test_google_login_creates_regular_user mocked verified Google credential creates
+                                     a Regular user bound to `google:<sub>` and
+                                     accepts the same identity again after email change.
+- test_google_login_does_not_silently_link_existing_user a case-insensitive local
+                                     email collision returns 409 and stays one row.
+- test_google_login_rejects_invalid_credential verifier failure maps to HTTP 401.
+- test_google_login_is_rate_limited_before_verification four concurrent requests
+                                     admit exactly one and reject three with 429.
+- test_google_login_rejects_inactive_user verified Google email cannot bypass an
+                                     inactive account's HTTP 403 block.
+- test_verify_google_credential_returns_verified_email mocked google-auth claims
+                                     produce normalized email and stable subject.
+- test_verify_google_credential_requires_verified_email an unverified claim raises
+                                     InvalidGoogleCredentialError.
 
 [ READS / WRITES / LOGS ]
 Exercises the real app: writes users, sets/checks Redis denylist, and (as a side
@@ -36,7 +50,8 @@ successful login clears its email/IP failure key. The deleted-user test directly
 deletes its user row; other created users remain in the shared DB.
 
 [ RELATIONS ]
-Calls (via HTTP): auth_routes, user_routes; also dependencies.get_current_user
+Calls (via HTTP): auth_routes, user_routes; directly checks google_auth_service;
+also dependencies.get_current_user
 (no-sub / deleted-user branches). Uses conftest.async_client, core.security
 (create_access_token), models.base/user_model (direct delete).
 

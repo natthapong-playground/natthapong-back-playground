@@ -2,7 +2,7 @@ backend-api-repo/
 ├── app/                        # Core Python Application
 │   ├── api/
 │   │   ├── controllers/        # CONTROLLER LAYER: Router endpoints
-│   │   │   ├── auth_routes.py  # /login (rate-limited), /logout, /refresh-token (Redis token denylist + rotation)
+│   │   │   ├── auth_routes.py  # Password/Google login, logout, refresh-token rotation
 │   │   │   ├── user_routes.py  # /users/register + /users/myprofile
 │   │   │   ├── audit_routes.py # /audit-logs (SuperAdmin-only read of API activity)
 │   │   │   ├── countries_routes.py # /countries, /countries/{code} (World Timezone; auth-required)
@@ -28,7 +28,8 @@ backend-api-repo/
 │   │
 │   ├── services/               # BUSINESS LOGIC LAYER: The absolute brains of the system
 │   │   ├── auth_service.py     # Redis token denylist: revoke and check JWT IDs
-│   │   ├── rate_limit_service.py # Redis-backed counters: login brute-force + register-per-IP throttle
+│   │   ├── google_auth_service.py # Verifies Google ID tokens and verified email claims
+│   │   ├── rate_limit_service.py # Redis counters: password, register, and Google auth throttles
 │   │   ├── user_service.py     # Evaluates domain logic before committing to database
 │   │   ├── audit_service.py    # Logging policy (should_log) + create/query of audit entries
 │   │   ├── timezone_service.py # Builds current country snapshots with zoneinfo offset/local time
@@ -62,12 +63,16 @@ backend-api-repo/
 │   └── test_websockets/        # (planned) Asserts connection handshakes and socket frame transfers
 │       └── test_chat.py
 │
-├── .env                        # Actual local config (SECRET_KEY, DATABASE_URL, REDIS_URL, ...)
+├── .env                        # Actual local config (ignored; never publish)
 ├── .env.example                # Committed template of required keys (placeholders, no secrets)
+├── .dockerignore               # Whitelists only app/ + requirements for Docker builds
 ├── requirements.txt            # Python dependencies
 ├── pytest.ini                  # Pytest / asyncio configuration
-├── Dockerfile                  # Production-optimized Python slim image
-└── docker-compose.yml          # Currently spawns: PostgreSQL + Redis only
+├── setup.bat                   # Windows: create project .venv, install, and generate local .env
+├── start.bat                   # Windows: validate, start healthy infrastructure, run the API
+├── stop.bat                    # Windows: stop project infrastructure without deleting containers
+├── Dockerfile                  # Python 3.12 application image (config supplied at runtime)
+└── docker-compose.yml          # PostgreSQL + Redis on localhost, with health checks
                                 #   (planned: 3x FastAPI replicas behind an Nginx round-robin proxy)
 
 

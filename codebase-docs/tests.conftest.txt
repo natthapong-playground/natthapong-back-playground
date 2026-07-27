@@ -1,7 +1,7 @@
 ================================================================================
 FILE:        tests/conftest.py
 LAYER:       test
-LAST-SYNCED: 2026-07-23
+LAST-SYNCED: 2026-07-27
 ================================================================================
 
 [ PLAIN ENGLISH ]
@@ -17,9 +17,9 @@ Pytest fixtures using httpx.AsyncClient over ASGITransport against app.main.app.
     Plain: An HTTP client tests use to call the API, tagged with a unique
            source IP so rate-limit counters don't leak between tests.
     Tech:  runs Base.metadata.create_all, then yields an AsyncClient on
-           ASGITransport(app) with base_url http://testserver and a per-test
-           random X-Forwarded-For header (isolates per-IP/per-account rate-limit
-           keys in the shared Redis, across tests and runs).
+           ASGITransport(app, client=(random_ip, 123)) with base_url
+           http://testserver. The direct per-test address isolates Redis keys
+           without relying on an untrusted X-Forwarded-For header.
 - auth_headers (fixture)
     Plain: A ready Authorization header for a freshly-registered, logged-in
            Regular user — for any endpoint that just needs a valid token.

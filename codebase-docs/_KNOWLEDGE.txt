@@ -3,7 +3,7 @@
 #   codebase-docs/  —  KNOWLEDGE BASE  (the concepts & tech behind the code)   #
 #                                                                              #
 ################################################################################
-LAST-SYNCED: 2026-07-23
+LAST-SYNCED: 2026-07-27
 
 PURPOSE
 -------
@@ -41,8 +41,9 @@ defends itself against password-guessing and signup spam.
 
 [ TECHNICAL ]
 A FastAPI (async Python) REST API with three concerns:
-  - AUTH / accounts: JWT-based login with access+refresh tokens, bcrypt password
-    hashing, role-based access, Redis-backed token revocation and rate limiting.
+  - AUTH / accounts: password or Google login feeding one JWT access+refresh
+    session system, bcrypt password hashing, role-based access, Redis-backed
+    token revocation and rate limiting.
   - WORLD CLOCK: a static dataset of ~252 countries -> live, DST-correct local
     time computed on demand (no times are ever stored).
   - OBSERVABILITY / SECURITY: an audit-log middleware records mutations and
@@ -75,6 +76,8 @@ but knowing the role of each makes everything click faster.
                          rate-limit counters.
   python-jose .......... JWT encode/decode (HS-family signing). (app/core/security)
   bcrypt ............... password hashing (salted, slow-by-design).
+  google-auth ........... Google ID-token signature, audience, issuer, expiry,
+                         and verified-email validation. (google_auth_service)
   zoneinfo + tzdata .... IANA timezone math for DST-correct offsets. (timezone svc)
   httpx + pytest + pytest-asyncio .. async test client + test runner. (tests/)
   uvicorn .............. the ASGI server that actually runs the app.
@@ -156,6 +159,18 @@ Token payload also carries `sub` (email) and `role` (set in auth_routes).
 Login flow: authenticate_user -> _issue_tokens -> {access_token, refresh_token,
 token_type:"bearer"} (schemas.token_schema.Token).
 
+Google login flow: the Angular Google Identity Services button sends its ID token
+to POST /google-login. google_auth_service verifies the token against
+GOOGLE_CLIENT_ID and requires email_verified=true plus Google's stable `sub`.
+user_service creates a Regular user whose required credential column stores a
+`google:<sub>` provider marker; repeat login must match it. Existing password users
+or another subject at that email return 409 instead of being silently linked.
+_issue_tokens then returns the same application JWT pair. Google tokens are not
+stored and no Google client secret is used. Certificate responses are HTTP-cached,
+credential bodies are capped at 4096 bytes, an atomic increment-first per-IP Redis
+throttle bounds anonymous requests, and an asyncio semaphore caps concurrent Google
+verification work per process.
+
 REFRESH ROTATION (auth_routes.refresh_access_token): a normal generated refresh
 token is verified, then revoked (its jti added to the denylist), and a brand new
 pair is issued. Rotation only calls revoke_token when `exp` is present; a custom
@@ -207,7 +222,10 @@ returns a dependency that runs get_current_user first (401 path) and then raises
     _: User = Depends(require_roles("SuperAdmin"))   # audit_routes
 Layering note: get_current_user owns the 401 cases; require_roles only adds 403.
 
-KNOWN GAP (documented, not a bug to "fix" silently): POST /users/register
+Google-created users are always Regular regardless of client input. The provider
+marker reuses hashed_password to avoid a migration in this private prototype; a
+multi-provider product should use a dedicated identity table. KNOWN GAP
+(documented, not a bug to "fix" silently): POST /users/register
 currently accepts any role in the payload, including SuperAdmin — there is no
 admin-only guard on account creation yet. (See user_routes doc NOTES.)
 
@@ -316,16 +334,17 @@ timestamps defaulted in Python (datetime.now(timezone.utc)).
 ################################################################################
 
 [ PLAIN ENGLISH ]
-All the knobs (database address, secret key, token lifetimes, rate limits) come
-from a .env file. If a required setting is missing, the app refuses to start —
-loud failure now beats mysterious misbehaviour later.
+All the knobs (database address, secret key, token lifetimes, rate limits, Google
+client ID) come from a .env file. If a core setting is missing, the app refuses
+to start. An absent Google client ID only disables that optional login method.
 
 [ TECHNICAL ]
-app/core/config.py: a pydantic-settings BaseSettings subclass with NO defaults,
-so a missing env var raises at import time. Instantiated once into the module
-singleton `settings`, imported everywhere. .env.example is the committed template;
-.env holds the real values. The JWT secret is SECRET_KEY (not JWT_SECRET). Because
-there are no defaults, tests and Docker must supply a COMPLETE .env.
+app/core/config.py: a pydantic-settings BaseSettings subclass. Core fields have no
+defaults, so missing values raise at import time; GOOGLE_CLIENT_ID, Google throttle/
+concurrency settings, and TRUSTED_PROXY_IPS have safe defaults, and Google auth
+returns 503 while disabled. Instantiated once into
+the module singleton `settings`, imported everywhere. .env.example is the
+committed template; .env holds real values. The JWT secret is SECRET_KEY.
 
 
 ################################################################################
@@ -348,7 +367,7 @@ Pydantic v2 models in app/schemas. Patterns in use:
     ConfigDict(alias_generator=to_camel, populate_by_name=True) — Python attrs
     stay snake_case (utc_offset_minutes) but JSON goes out camelCase
     (utcOffsetMinutes). This is the contract the Angular client consumes.
-  - Token / RefreshRequest: the auth payload shapes.
+  - Token / RefreshRequest / GoogleLoginRequest: the auth payload shapes.
 
 
 ################################################################################
@@ -391,7 +410,7 @@ tokens, access-control blocks, and security headers on handled responses.
 [ TECHNICAL ]
 pytest + pytest-asyncio, async httpx client against the ASGI app (tests/conftest.py
 provides the client + auth_headers fixtures). Coverage by file:
-  test_auth/login/users ... register, login branches, profile, logout flows
+  test_auth/login/users ... register, password/Google login, profile, logout flows
   test_refresh ............ refresh rotation + access/refresh type separation
   test_rate_limit ......... login lockout + reset-on-success
   test_audit .............. access control + should_log policy
@@ -412,6 +431,8 @@ A quick checklist of how the system protects itself.
 
 [ TECHNICAL ]
   Passwords ........ bcrypt-hashed (salted), never stored or logged in plaintext.
+  Google identity .. Google-signed ID token, audience and verified-email checks;
+                     stable sub binding; Google tokens are not persisted.
   Sessions ......... short access token + rotating single-use refresh token.
   Revocation ....... Redis denylist keyed on jti, auto-expiring at token exp.
   Token confusion .. `type` claim stops refresh-as-access misuse.
@@ -422,6 +443,7 @@ A quick checklist of how the system protects itself.
   Authorization .... role checks via require_roles (e.g. SuperAdmin-only audit).
   Auditability ..... mutations + failures + sensitive reads recorded.
   CORS ............. restricted to settings.ORIGINS_API.
+  Proxy addresses .. X-Forwarded-For is accepted only from TRUSTED_PROXY_IPS.
   OPEN GAPS ........ register accepts arbitrary role; missing-jti access tokens
                      bypass denylist lookup; refresh rotation relies on exp;
                      tests share real infra with no teardown.

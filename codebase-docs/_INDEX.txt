@@ -3,7 +3,7 @@
 #   codebase-docs/  —  HEAD / INDEX  (read this first)                         #
 #                                                                              #
 ################################################################################
-LAST-SYNCED: 2026-07-23
+LAST-SYNCED: 2026-07-27
 
 PURPOSE
 -------
@@ -109,7 +109,7 @@ CORE (config + cross-cutting)
 
 API (controllers + DI)
     app.api.dependencies.txt ..... get_db / get_redis / get_current_user / require_roles
-    app.api.controllers.auth_routes.txt ... /login (rate-limited), /logout, /refresh-token
+    app.api.controllers.auth_routes.txt ... password/Google login, logout, refresh-token
     app.api.controllers.user_routes.txt ... /users/register, /users/myprofile
     app.api.controllers.audit_routes.txt .. /audit-logs (SuperAdmin only)
     app.api.controllers.countries_routes.txt /countries, /countries/{code} (auth-required)
@@ -128,7 +128,8 @@ SCHEMAS (Pydantic)
 
 SERVICES (business logic)
     app.services.auth_service.txt  Redis token denylist (revoke / check)
-    app.services.rate_limit_service.txt Redis login/register rate-limit counters
+    app.services.google_auth_service.txt Google ID-token and verified-email validation
+    app.services.rate_limit_service.txt Redis password/register/Google rate-limit counters
     app.services.user_service.txt  user lookup/creation + authentication
     app.services.audit_service.txt logging policy + create/query audit entries
     app.services.timezone_service.txt builds current country time snapshots

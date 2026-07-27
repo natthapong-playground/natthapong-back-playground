@@ -4,6 +4,15 @@ from app.core.config import settings
 
 LOGIN_FAIL_PREFIX = "login_fail:"
 REGISTER_PREFIX = "register_attempt:"
+GOOGLE_LOGIN_PREFIX = "google_login_attempt:"
+
+_HIT_SCRIPT = """
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count
+"""
 
 def _key(prefix: str, identifier: str) -> str:
     return f"{prefix}{identifier}"
@@ -16,10 +25,7 @@ async def _count(r: redis.Redis, prefix: str, identifier: str) -> int:
 
 async def _hit(r: redis.Redis, prefix: str, identifier: str, window: int) -> int:
     key = _key(prefix, identifier)
-    count = await r.incr(key)
-    if count == 1:
-        await r.expire(key, window)
-    return count
+    return int(await r.eval(_HIT_SCRIPT, 1, key, window))
 
 
 async def _retry_after(r: redis.Redis, prefix: str, identifier: str, window: int) -> int:
@@ -59,3 +65,22 @@ async def record_register_attempt(r: redis.Redis, identifier: str) -> int:
 
 async def get_register_retry_after(r: redis.Redis, identifier: str) -> int:
     return await _retry_after(r, REGISTER_PREFIX, identifier, settings.REGISTER_RATE_LIMIT_WINDOW_SECONDS)
+
+
+# --- Google login throttle (counts EVERY attempt per source IP) --------------- #
+async def record_google_login_attempt(r: redis.Redis, identifier: str) -> int:
+    return await _hit(
+        r,
+        GOOGLE_LOGIN_PREFIX,
+        identifier,
+        settings.GOOGLE_LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+    )
+
+
+async def get_google_login_retry_after(r: redis.Redis, identifier: str) -> int:
+    return await _retry_after(
+        r,
+        GOOGLE_LOGIN_PREFIX,
+        identifier,
+        settings.GOOGLE_LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+    )

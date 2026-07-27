@@ -1,29 +1,35 @@
 ================================================================================
 FILE:        app/core/config.py
 LAYER:       core
-LAST-SYNCED: 2026-07-23
+LAST-SYNCED: 2026-07-27
 ================================================================================
 
 [ PLAIN ENGLISH ]
 This file reads the project's settings from the `.env` file (things like the
 database address, the secret key, and how long a login lasts). If a required
-setting is missing, the app refuses to start — which is good, because it fails
-loudly instead of misbehaving later.
+setting is missing, the app refuses to start. Google sign-in is the exception:
+it remains disabled until its optional client ID is configured.
 
 [ TECHNICAL ]
-A pydantic-settings BaseSettings subclass. All fields are required (no defaults),
-so a missing env var raises at import time. Loaded once into the module-level
-singleton `settings`, imported everywhere else.
+A pydantic-settings BaseSettings subclass. Core fields are required, while
+GOOGLE_CLIENT_ID defaults to an empty string so existing local-password setups
+still start with Google auth disabled. Loaded once into the module-level singleton
+`settings`, imported everywhere else.
 
 [ METHODS / SYMBOLS ]
 - Settings (class)
     Plain: The typed list of every setting the app needs.
     Tech:  Fields: PROJECT_NAME, API_V1_STR, SECRET_KEY, DATABASE_URL, REDIS_URL,
+           GOOGLE_CLIENT_ID (str, empty default),
            ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES (int),
            REFRESH_TOKEN_EXPIRE_MINUTES (int), LOGIN_RATE_LIMIT_MAX_ATTEMPTS
            (int), LOGIN_RATE_LIMIT_WINDOW_SECONDS (int),
            REGISTER_RATE_LIMIT_MAX_ATTEMPTS (int),
-           REGISTER_RATE_LIMIT_WINDOW_SECONDS (int), ORIGINS_API (list[str]).
+           REGISTER_RATE_LIMIT_WINDOW_SECONDS (int),
+           GOOGLE_LOGIN_RATE_LIMIT_MAX_ATTEMPTS (int, default 30),
+           GOOGLE_LOGIN_RATE_LIMIT_WINDOW_SECONDS (int, default 60),
+           GOOGLE_VERIFICATION_MAX_CONCURRENCY (int, default 8),
+           ORIGINS_API (list[str]), TRUSTED_PROXY_IPS (list[str], empty default).
            model_config: env_file=".env", utf-8, extra="ignore".
 - settings (instance)
     Plain: The ready-to-use settings object.
@@ -39,5 +45,8 @@ Calls:     pydantic-settings only.
 
 [ NOTES / GOTCHAS ]
 The JWT secret is named SECRET_KEY here (NOT JWT_SECRET, despite older docs).
-All fields have no defaults, so tests and Docker must supply a complete .env.
+Google identity/throttle/concurrency settings and TRUSTED_PROXY_IPS have defaults;
+other fields must be supplied by tests and Docker. An empty Google client ID
+disables Google credential verification without affecting password auth. Forwarded
+addresses are ignored unless the direct peer appears in TRUSTED_PROXY_IPS.
 Unknown environment fields are ignored because model_config uses extra="ignore".

@@ -1,11 +1,13 @@
+import asyncio
 import pytest
 import time
 from uuid import uuid4
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from app.core.config import settings
 from app.core.security import create_access_token
 from app.models.base import AsyncSessionLocal
 from app.models.user_model import User
+from app.services import google_auth_service
 pytestmark = pytest.mark.asyncio
 
 
@@ -145,3 +147,162 @@ async def test_profile_rejects_deleted_user(async_client):
     )
 
     assert response.status_code == 401
+
+
+async def test_google_login_creates_regular_user(async_client, monkeypatch):
+    email = f"pytest_google_{uuid4().hex}@gmail.com"
+    verified_email = email
+    subject = uuid4().hex
+
+    async def verify(_credential):
+        return google_auth_service.GoogleIdentity(email=verified_email, subject=subject)
+
+    monkeypatch.setattr(google_auth_service, "verify_google_credential", verify)
+    response = await async_client.post(
+        f"{settings.API_V1_STR}/google-login",
+        json={"credential": "valid-google-id-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["token_type"] == "bearer"
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(User).where(User.email == email))
+        user = result.scalars().one()
+    assert user.role == "Regular"
+    assert user.hashed_password == f"google:{subject}"
+
+    verified_email = f"changed_{uuid4().hex}@gmail.com"
+    repeat = await async_client.post(
+        f"{settings.API_V1_STR}/google-login",
+        json={"credential": "another-valid-google-id-token"},
+    )
+    assert repeat.status_code == 200
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(User).where(User.hashed_password == f"google:{subject}")
+        )
+        assert len(result.scalars().all()) == 1
+
+
+async def test_google_login_does_not_silently_link_existing_user(async_client, monkeypatch):
+    email = f"Pytest_google_existing_{uuid4().hex}@gmail.com"
+    password = "ExistingPassword123"
+    await async_client.post(
+        f"{settings.API_V1_STR}/users/register",
+        json={"email": email, "role": "Regular", "password": password},
+    )
+
+    async def verify(_credential):
+        return google_auth_service.GoogleIdentity(email=email.lower(), subject=uuid4().hex)
+
+    monkeypatch.setattr(google_auth_service, "verify_google_credential", verify)
+    response = await async_client.post(
+        f"{settings.API_V1_STR}/google-login",
+        json={"credential": "valid-google-id-token"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "This email is already registered with another sign-in method."
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(User).where(User.email == email))
+        assert len(result.scalars().all()) == 1
+
+
+async def test_google_login_rejects_invalid_credential(async_client, monkeypatch):
+    async def reject(_credential):
+        raise google_auth_service.InvalidGoogleCredentialError()
+
+    monkeypatch.setattr(google_auth_service, "verify_google_credential", reject)
+    response = await async_client.post(
+        f"{settings.API_V1_STR}/google-login",
+        json={"credential": "invalid-google-id-token"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Could not validate Google credentials."
+
+
+async def test_google_login_is_rate_limited_before_verification(async_client, monkeypatch):
+    calls = 0
+
+    async def reject(_credential):
+        nonlocal calls
+        calls += 1
+        raise google_auth_service.InvalidGoogleCredentialError()
+
+    monkeypatch.setattr(settings, "GOOGLE_LOGIN_RATE_LIMIT_MAX_ATTEMPTS", 1)
+    monkeypatch.setattr(google_auth_service, "verify_google_credential", reject)
+
+    responses = await asyncio.gather(
+        *(
+            async_client.post(
+                f"{settings.API_V1_STR}/google-login",
+                json={"credential": f"invalid-google-id-token-{index}"},
+            )
+            for index in range(4)
+        )
+    )
+
+    assert sorted(response.status_code for response in responses) == [401, 429, 429, 429]
+    assert calls == 1
+
+
+async def test_google_login_rejects_inactive_user(async_client, monkeypatch):
+    email = f"pytest_google_inactive_{uuid4().hex}@gmail.com"
+    subject = uuid4().hex
+    async with AsyncSessionLocal() as session:
+        session.add(
+            User(
+                email=email,
+                hashed_password=f"google:{subject}",
+                role="Regular",
+                is_active=False,
+            )
+        )
+        await session.commit()
+
+    async def verify(_credential):
+        return google_auth_service.GoogleIdentity(email=email, subject=subject)
+
+    monkeypatch.setattr(google_auth_service, "verify_google_credential", verify)
+    response = await async_client.post(
+        f"{settings.API_V1_STR}/google-login",
+        json={"credential": "valid-google-id-token"},
+    )
+
+    assert response.status_code == 403
+
+
+async def test_verify_google_credential_returns_verified_email(monkeypatch):
+    monkeypatch.setattr(settings, "GOOGLE_CLIENT_ID", "test-client-id")
+    monkeypatch.setattr(
+        google_auth_service.id_token,
+        "verify_oauth2_token",
+        lambda credential, request, audience: {
+            "email": "Verified.User@Gmail.com",
+            "email_verified": True,
+            "sub": "google-subject-123",
+        },
+    )
+
+    email = await google_auth_service.verify_google_credential("valid-token")
+
+    assert email.email == "verified.user@gmail.com"
+    assert email.subject == "google-subject-123"
+
+
+async def test_verify_google_credential_requires_verified_email(monkeypatch):
+    monkeypatch.setattr(settings, "GOOGLE_CLIENT_ID", "test-client-id")
+    monkeypatch.setattr(
+        google_auth_service.id_token,
+        "verify_oauth2_token",
+        lambda credential, request, audience: {
+            "email": "unverified@gmail.com",
+            "email_verified": False,
+            "sub": "google-subject-456",
+        },
+    )
+
+    with pytest.raises(google_auth_service.InvalidGoogleCredentialError):
+        await google_auth_service.verify_google_credential("unverified-token")

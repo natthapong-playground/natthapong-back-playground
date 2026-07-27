@@ -1,12 +1,13 @@
 ================================================================================
 FILE:        app/api/controllers/auth_routes.py
 LAYER:       controller
-LAST-SYNCED: 2026-07-23
+LAST-SYNCED: 2026-07-27
 ================================================================================
 
 [ PLAIN ENGLISH ]
-This handles logging in, logging out, and renewing a session. Logging in checks
-the email/password and hands back two tickets (a short access ticket and a
+This handles password or Google login, logout, and session renewal. Password login
+checks the email/password; Google login verifies the chosen Google account. Both
+hand back two tickets (a short access ticket and a
 long-lived refresh ticket); too many wrong tries from the same account+device get
 temporarily locked out. Renewing swaps a valid refresh ticket for a fresh pair
 (normally killing the old refresh ticket so it can't be reused). Logging out
@@ -14,14 +15,15 @@ attempts to revoke the bearer ticket and an optional refresh ticket, but current
 accepts any validly signed bearer JWT rather than requiring an access ticket.
 
 [ TECHNICAL ]
-Thin controller. Delegates auth to user_service, brute-force counting to
-rate_limit_service, and token revocation to auth_service. Mounted at API_V1_STR
-(so /api/v1/login, /api/v1/refresh-token, /api/v1/logout).
+Thin controller. Delegates password/account work to user_service, Google proof
+validation to google_auth_service, brute-force counting to rate_limit_service,
+and token revocation to auth_service. Mounted at API_V1_STR.
 
 [ METHODS / SYMBOLS ]
 - _client_ip(request) -> str
-    Plain: The caller's IP (proxy-aware) for the rate-limit key.
-    Tech:  first X-Forwarded-For entry, else request.client.host, else "unknown".
+    Plain: The caller's direct IP, or its forwarded IP only through a trusted proxy.
+    Tech:  Uses first X-Forwarded-For entry only when request.client.host is in
+           settings.TRUSTED_PROXY_IPS; otherwise direct host or "unknown".
 - _issue_tokens(email, role) -> dict
     Plain: Build the {access, refresh, bearer} response.
     Tech:  create_access_token + create_refresh_token on {sub, role}.
@@ -30,6 +32,15 @@ rate_limit_service, and token revocation to auth_service. Mounted at API_V1_STR
     Tech:  identifier = "<email>|<ip>". 429 (+Retry-After) if is_login_blocked;
            403 on InactiveUserError; on bad creds record_login_failure then 401;
            on success clear_login_failures and return _issue_tokens.
+- google_login(payload_in, request, db, r)  ->  POST /google-login
+    Plain: Sign in with a verified Google account, creating a Regular account on
+           its first use and refusing to take over another sign-in method.
+    Tech:  Atomically increments a per-IP fixed-window counter, admitting only counts
+           within the configured maximum and returning 429 before verification. Verifies
+           GoogleLoginRequest.credential through google_auth_service; maps missing
+           config to 503 and invalid proof to 401; passes verified email+sub to
+           get_or_create_google_user; maps identity conflict to 409, rejects inactive
+           users with 403, and returns the normal JWT pair through _issue_tokens.
 - refresh_access_token(payload_in, db, r)  ->  POST /refresh-token
     Plain: Swap a refresh ticket for a new pair; normal app-issued tickets are
            burned, but a custom signed ticket without an expiry is not.
@@ -53,15 +64,16 @@ rate_limit_service, and token revocation to auth_service. Mounted at API_V1_STR
            {"message": "Successfully logged out."}.
 
 [ READS / WRITES / LOGS ]
-Reads: form creds / bearer token / refresh body (login, logout, refresh), users
-table, Redis (login-fail counter + denylist). Writes: Redis login-fail counter
+Reads: form creds / Google credential / bearer token / refresh body, users
+table, Redis (login/Google counters + denylist). Writes: Redis auth counters
 (login), Redis denylist key (logout revokes access + optional refresh; refresh
 rotation). Audited by middleware: POST /login, /refresh-token, /logout (and their
 failures).
 
 [ RELATIONS ]
 Called by: HTTP clients; router included in main.
-Calls:     services.user_service (authenticate_user, get_user_by_email),
+Calls:     services.user_service (authenticate_user, get_or_create_google_user,
+           get_user_by_email), services.google_auth_service,
            services.auth_service (revoke_token, is_token_revoked),
            services.rate_limit_service, core.security (create_access_token,
            create_refresh_token), api.dependencies, schemas.token_schema.
@@ -75,3 +87,7 @@ not revoked. Logout accepts any validly signed bearer JWT regardless of its
 `type` or `sub`; missing jti/exp and already-expired tokens cannot add a live
 denylist key. A missing, malformed, wrong-type, or expired optional refresh token
 does not block logout. Passwords are never logged (middleware records metadata).
+Google login has a separate per-IP attempt throttle because Google owns credential
+validation. It requires verified email+sub claims and always creates Regular users.
+An email already used by local auth or another Google subject returns 409 rather
+than inheriting that account or its role.

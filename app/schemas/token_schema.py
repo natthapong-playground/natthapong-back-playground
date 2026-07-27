@@ -1,4 +1,5 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
 
 class Token(BaseModel):
     access_token: str
@@ -7,3 +8,7 @@ class Token(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class GoogleLoginRequest(BaseModel):
+    credential: str = Field(min_length=1, max_length=4096)
